@@ -64,7 +64,7 @@
       release:
         name: "releaseAndroid"
         runs-on: "ubuntu-latest"
-
+        needs: [flutter-build-android] 
         permissions: write-all
         steps:
           - name: Clone repository
@@ -94,7 +94,7 @@
               mkdir build
               mkdir build/unsigned
               mkdir build/signed
-              cp android_outputs/* build/unsigned/Kazumi_android_${{ env.tag }}.apk
+              cp android_outputs/* build/unsigned/
           
           - name: Sign APK
             id: sign_app
@@ -108,7 +108,7 @@
               BUILD_TOOLS_VERSION: "34.0.0"
 
           - name: Copy Signed android build file
-            run: cp ${{steps.sign_app.outputs.signedReleaseFile}} build/signed/*.apk
+            run: cp ${{steps.sign_app.outputs.signedReleaseFile}} build/signed/
 
           - name: Create release
             uses: softprops/action-gh-release@v2
