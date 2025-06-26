@@ -108,7 +108,10 @@
               BUILD_TOOLS_VERSION: "34.0.0"
 
           - name: Copy Signed android build file
-            run: cp build/unsigned/app-*signed.apk build/signed/
+            run: |
+              cp build/unsigned/app-arm64-v8a-release-signed.apk build/signed/Kazumi_${{ env.tag }}_arm64_v8a.apk
+              cp build/unsigned/app-armeabi-v7a-release-signed.apk build/signed/Kazumi_${{ env.tag }}_armeabi_v7a.apk
+              cp build/unsigned/app-x86_64-release-signed.apk build/signed/Kazumi_${{ env.tag }}_x86_64.apk
 
           - name: Create release
             uses: softprops/action-gh-release@v2
