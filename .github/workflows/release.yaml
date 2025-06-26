@@ -108,7 +108,7 @@
               BUILD_TOOLS_VERSION: "34.0.0"
 
           - name: Copy Signed android build file
-            run: cp ${{steps.sign_app.outputs.signedReleaseFiles}} build/signed/
+            run: cp ${{env.SIGNED_RELEASE_FILES}} build/signed/
 
           - name: Create release
             uses: softprops/action-gh-release@v2
