@@ -264,7 +264,7 @@ abstract class _PlayerController with Store {
     await pp.setProperty('cache-on-disk', 'no');
     if (Platform.isAndroid) {
       await pp.setProperty("volume-max", "100");
-      // await pp.setProperty("ao", "opensles");
+      await pp.setProperty("ao", "audiotrack,opensles");
     }
 
     await mediaPlayer.setAudioTrack(
