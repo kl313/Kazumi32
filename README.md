@@ -55,9 +55,9 @@
 
 ## 下载
 
-通过本页面 [releases](https://github.com/Predidit/Kazumi/releases) 选项卡下载：
+通过本页面 [releases](https://github.com/kl313/Kazumi32/releases) 选项卡下载：
 
-<a href="https://github.com/Predidit/Kazumi/releases">
+<a href="https://github.com/kl313/Kazumi32/releases">
   <img src="static/svg/get_it_on_github.svg" alt="Get it on Github" width="200"/>
 </a>
 
