@@ -30,7 +30,12 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
         setting.get(SettingBoxKey.enableGitProxy, defaultValue: false);
   }
 
-  void onBackPressed(BuildContext context) {}
+  void onBackPressed(BuildContext context) {
+    if (KazumiDialog.observer.hasKazumiDialog) {
+      KazumiDialog.dismiss();
+      return;
+    }
+  }
 
   Future<void> checkWebDav() async {
     var webDavURL =
@@ -60,8 +65,17 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
     if (webDavEnable) {
       KazumiDialog.showToast(message: '尝试上传到WebDav');
       var webDav = WebDav();
-      await webDav.updateHistory();
-      KazumiDialog.showToast(message: '同步成功');
+      try {
+        await webDav.ping();
+        try {
+          await webDav.updateHistory();
+          KazumiDialog.showToast(message: '同步成功');
+        } catch (e) {
+          KazumiDialog.showToast(message: '同步失败 ${e.toString()}');
+        }
+      } catch (e) {
+        KazumiDialog.showToast(message: 'WebDAV连接失败');
+      }
     } else {
       KazumiDialog.showToast(message: '未开启WebDav同步或配置无效');
     }
@@ -71,13 +85,18 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
     var webDavEnable =
         await setting.get(SettingBoxKey.webDavEnable, defaultValue: false);
     if (webDavEnable) {
+      KazumiDialog.showToast(message: '尝试从WebDav同步');
+      var webDav = WebDav();
       try {
-        KazumiDialog.showToast(message: '尝试从WebDav同步');
-        var webDav = WebDav();
-        await webDav.downloadAndPatchHistory();
-        KazumiDialog.showToast(message: '同步成功');
+        await webDav.ping();
+        try {
+          await webDav.downloadAndPatchHistory();
+          KazumiDialog.showToast(message: '同步成功');
+        } catch (e) {
+          KazumiDialog.showToast(message: '同步失败 ${e.toString()}');
+        }
       } catch (e) {
-        KazumiDialog.showToast(message: '同步失败 ${e.toString()}');
+        KazumiDialog.showToast(message: 'WebDAV连接失败');
       }
     } else {
       KazumiDialog.showToast(message: '未开启WebDav同步或配置无效');
@@ -94,96 +113,100 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
       },
       child: Scaffold(
         appBar: const SysAppBar(title: Text('同步设置')),
-        body: Center(
-          child: SizedBox(
-            width: (MediaQuery.of(context).size.width > 1000) ? 1000 : null,
-            child: SettingsList(
-              sections: [
-                SettingsSection(
-                  title: const Text('Github'),
-                  tiles: [
-                    SettingsTile.switchTile(
-                      onToggle: (value) async {
-                        enableGitProxy = value ?? !enableGitProxy;
-                        await setting.put(
-                            SettingBoxKey.enableGitProxy, enableGitProxy);
-                        setState(() {});
-                      },
-                      title: const Text('Github镜像'),
-                      description: const Text('使用镜像访问规则托管仓库'),
-                      initialValue: enableGitProxy,
-                    ),
-                  ],
-                ),
-                SettingsSection(
-                  title: const Text('WEBDAV'),
-                  tiles: [
-                    SettingsTile.switchTile(
-                      onToggle: (value) async {
-                        webDavEnable = value ?? !webDavEnable;
-                        if (!WebDav().initialized && webDavEnable) {
-                          WebDav().init();
-                        }
-                        await setting.put(
-                            SettingBoxKey.webDavEnable, webDavEnable);
-                        setState(() {});
-                      },
-                      title: const Text('WEBDAV同步'),
-                      initialValue: webDavEnable,
-                    ),
-                    SettingsTile.switchTile(
-                      onToggle: (value) async {
-                        if (!webDavEnable) {
-                          KazumiDialog.showToast(message: '请先开启WEBDAV同步');
-                          return;
-                        }
-                        webDavEnableHistory = value ?? !webDavEnableHistory;
-                        await setting.put(SettingBoxKey.webDavEnableHistory,
-                            webDavEnableHistory);
-                        setState(() {});
-                      },
-                      title: const Text('观看记录同步'),
-                      description: const Text('允许自动同步观看记录'),
-                      initialValue: webDavEnableHistory,
-                    ),
-                    SettingsTile.navigation(
-                      onPressed: (_) async {
-                        Modular.to.pushNamed('/settings/webdav/editor');
-                      },
-                      title: Text(
-                        'WEBDAV配置',
-                        style: Theme.of(context).textTheme.titleMedium!,
-                      ),
-                    ),
-                  ],
-                ),
-                SettingsSection(
-                  bottomInfo: const Text('立即上传观看记录到WEBDAV'),
-                  tiles: [
-                    SettingsTile(
-                      trailing: const Icon(Icons.cloud_upload_rounded),
-                      onPressed: (_) {
-                        updateWebdav();
-                      },
-                      title: const Text('手动上传'),
-                    ),
-                  ],
-                ),
-                SettingsSection(
-                  bottomInfo: const Text('立即下载观看记录到本地'),
-                  tiles: [
-                    SettingsTile(
-                      trailing: const Icon(Icons.cloud_download_rounded),
-                      onPressed: (_) {
-                        downloadWebdav();
-                      },
-                      title: const Text('手动下载'),
-                    ),
-                  ],
+        body: SettingsList(
+          maxWidth: 1000,
+          sections: [
+            SettingsSection(
+              title: const Text('Github'),
+              tiles: [
+                SettingsTile.switchTile(
+                  onToggle: (value) async {
+                    enableGitProxy = value ?? !enableGitProxy;
+                    await setting.put(
+                        SettingBoxKey.enableGitProxy, enableGitProxy);
+                    setState(() {});
+                  },
+                  title: const Text('Github镜像'),
+                  description: const Text('使用镜像访问规则托管仓库'),
+                  initialValue: enableGitProxy,
                 ),
               ],
             ),
-          ),
+            SettingsSection(
+              title: const Text('WEBDAV'),
+              tiles: [
+                SettingsTile.switchTile(
+                  onToggle: (value) async {
+                    webDavEnable = value ?? !webDavEnable;
+                    if (!WebDav().initialized && webDavEnable) {
+                      try {
+                        await WebDav().init();
+                      } catch (e) {
+                        webDavEnable = false;
+                        KazumiDialog.showToast(message: 'WEBDAV初始化失败 $e');
+                      }
+                    }
+                    if (!webDavEnable) {
+                      webDavEnableHistory = false;
+                      await setting.put(
+                          SettingBoxKey.webDavEnableHistory, false);
+                    }
+                    await setting.put(SettingBoxKey.webDavEnable, webDavEnable);
+                    if (mounted) {
+                      setState(() {});
+                    }
+                  },
+                  title: const Text('WEBDAV同步'),
+                  initialValue: webDavEnable,
+                ),
+                SettingsTile.switchTile(
+                  onToggle: (value) async {
+                    if (!webDavEnable) {
+                      KazumiDialog.showToast(message: '请先开启WEBDAV同步');
+                      return;
+                    }
+                    webDavEnableHistory = value ?? !webDavEnableHistory;
+                    await setting.put(
+                        SettingBoxKey.webDavEnableHistory, webDavEnableHistory);
+                    setState(() {});
+                  },
+                  title: const Text('观看记录同步'),
+                  description: const Text('允许自动同步观看记录'),
+                  initialValue: webDavEnableHistory,
+                ),
+                SettingsTile.navigation(
+                  onPressed: (_) async {
+                    Modular.to.pushNamed('/settings/webdav/editor');
+                  },
+                  title: const Text('WEBDAV配置'),
+                ),
+              ],
+            ),
+            SettingsSection(
+              bottomInfo: const Text('立即上传观看记录到WEBDAV'),
+              tiles: [
+                SettingsTile(
+                  trailing: const Icon(Icons.cloud_upload_rounded),
+                  onPressed: (_) {
+                    updateWebdav();
+                  },
+                  title: const Text('手动上传'),
+                ),
+              ],
+            ),
+            SettingsSection(
+              bottomInfo: const Text('立即下载观看记录到本地'),
+              tiles: [
+                SettingsTile(
+                  trailing: const Icon(Icons.cloud_download_rounded),
+                  onPressed: (_) {
+                    downloadWebdav();
+                  },
+                  title: const Text('手动下载'),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );

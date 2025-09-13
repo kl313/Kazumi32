@@ -191,15 +191,20 @@ class _PlayerItemState extends State<PlayerItem>
     });
   }
 
-  void _handleFullscreenChange(BuildContext context) async {
-    if (videoPageController.isFullscreen && !Utils.isTablet()) {
-      playerController.lockPanel = false;
-    }
-    playerController.danmakuController.clear();
+  Future<void> _uploadHistoryToWebDav() async {
     if (webDavEnable && webDavEnableHistory) {
-      var webDav = WebDav();
-      webDav.updateHistory();
+      try {
+        var webDav = WebDav();
+        await webDav.updateHistory();
+      } catch (_) {}
     }
+  }
+
+  void _handleFullscreenChange(BuildContext context) async {
+    playerController.lockPanel = false;
+    playerController.danmakuController.clear();
+
+    await _uploadHistoryToWebDav();
   }
 
   void handleProgressBarDragStart(ThumbDragDetails details) {
@@ -212,6 +217,7 @@ class _PlayerItemState extends State<PlayerItem>
   void handleProgressBarDragEnd() {
     playerController.play(enableSync: false);
     startHideTimer();
+    playerTimer?.cancel();
     playerTimer = getPlayerTimer();
   }
 
@@ -356,15 +362,17 @@ class _PlayerItemState extends State<PlayerItem>
       }
       // 历史记录相关
       if (playerController.playerPlaying && !videoPageController.loading) {
-        historyController.updateHistory(
-            videoPageController.currentEpisode,
-            videoPageController.currentRoad,
-            videoPageController.currentPlugin.name,
-            videoPageController.bangumiItem,
-            playerController.playerPosition,
-            videoPageController.src,
-            videoPageController.roadList[videoPageController.currentRoad]
-                .identifier[videoPageController.currentEpisode - 1]);
+        if (!WebDav().isHistorySyncing) {
+          historyController.updateHistory(
+              videoPageController.currentEpisode,
+              videoPageController.currentRoad,
+              videoPageController.currentPlugin.name,
+              videoPageController.bangumiItem,
+              playerController.playerPosition,
+              videoPageController.src,
+              videoPageController.roadList[videoPageController.currentRoad]
+                  .identifier[videoPageController.currentEpisode - 1]);
+        }
       }
       // 自动播放下一集
       if (playerController.completed &&
@@ -416,7 +424,7 @@ class _PlayerItemState extends State<PlayerItem>
                 KazumiDialog.showLoading(msg: '弹幕检索中');
                 try {
                   danmakuEpisodeResponse =
-                      await DanmakuRequest.getDanDanEpisodesByBangumiID(
+                      await DanmakuRequest.getDanDanEpisodesByDanDanBangumiID(
                           danmakuInfo.animeId);
                 } catch (e) {
                   KazumiDialog.dismiss();
@@ -1280,6 +1288,7 @@ class _PlayerItemState extends State<PlayerItem>
                                   hideTimer?.cancel();
                                   startHideTimer();
                                 }
+                                playerTimer?.cancel();
                                 playerTimer = getPlayerTimer();
                                 playerController.showSeekTime = false;
                               },

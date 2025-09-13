@@ -120,7 +120,10 @@ class _PluginViewPageState extends State<PluginViewPage> {
   }
 
   void onBackPressed(BuildContext context) {
-    // Navigator.of(context).pop();
+    if (KazumiDialog.observer.hasKazumiDialog) {
+      KazumiDialog.dismiss();
+      return;
+    }
   }
 
   @override
@@ -183,7 +186,8 @@ class _PluginViewPageState extends State<PluginViewPage> {
                               ),
                               TextButton(
                                 onPressed: () {
-                                  pluginsController.removePlugins(selectedNames);
+                                  pluginsController
+                                      .removePlugins(selectedNames);
                                   setState(() {
                                     isMultiSelectMode = false;
                                     selectedNames.clear();
@@ -200,17 +204,19 @@ class _PluginViewPageState extends State<PluginViewPage> {
               ),
             ] else ...[
               IconButton(
-                  onPressed: () {
-                    _handleUpdate();
-                  },
-                  tooltip: '更新全部',
-                  icon: const Icon(Icons.update)),
+                onPressed: () {
+                  _handleUpdate();
+                },
+                tooltip: '更新全部',
+                icon: const Icon(Icons.update),
+              ),
               IconButton(
-                  onPressed: () {
-                    _handleAdd();
-                  },
-                  tooltip: '添加规则',
-                  icon: const Icon(Icons.add))
+                onPressed: () {
+                  _handleAdd();
+                },
+                tooltip: '添加规则',
+                icon: const Icon(Icons.add),
+              )
             ],
           ],
         ),
@@ -221,128 +227,124 @@ class _PluginViewPageState extends State<PluginViewPage> {
                 )
               : Builder(builder: (context) {
                   return ReorderableListView.builder(
-                    buildDefaultDragHandles: false,
-                    proxyDecorator: (child, index, animation) {
-                      return Material(
-                        elevation: 0,
-                        color: Colors.transparent,
-                        child: child,
-                      );
-                    },
-                    onReorder: (int oldIndex, int newIndex) {
-                      pluginsController.onReorder(oldIndex, newIndex);
-                    },
-                    itemCount: pluginsController.pluginList.length,
-                    itemBuilder: (context, index) {
-                      var plugin = pluginsController.pluginList[index];
-                      bool canUpdate =
-                          pluginsController.pluginUpdateStatus(plugin) ==
-                              'updatable';
-                      return Card(
-                        key: ValueKey(index),
-                        margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                        child: ListTile(
-                          trailing: pluginCardTrailing(index),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                          onLongPress: () {
-                            if (!isMultiSelectMode) {
-                              setState(() {
-                                isMultiSelectMode = true;
-                                selectedNames.add(plugin.name);
-                              });
-                            }
-                          },
-                          onTap: () {
-                            if (isMultiSelectMode) {
-                              setState(() {
-                                if (selectedNames.contains(plugin.name)) {
-                                  selectedNames.remove(plugin.name);
-                                  if (selectedNames.isEmpty) {
-                                    isMultiSelectMode = false;
-                                  }
-                                } else {
-                                  selectedNames.add(plugin.name);
+                      buildDefaultDragHandles: false,
+                      proxyDecorator: (child, index, animation) {
+                        return Material(
+                          elevation: 0,
+                          color: Colors.transparent,
+                          child: child,
+                        );
+                      },
+                      onReorder: (int oldIndex, int newIndex) {
+                        pluginsController.onReorder(oldIndex, newIndex);
+                      },
+                      itemCount: pluginsController.pluginList.length,
+                      itemBuilder: (context, index) {
+                        var plugin = pluginsController.pluginList[index];
+                        bool canUpdate =
+                            pluginsController.pluginUpdateStatus(plugin) ==
+                                'updatable';
+                        return Card(
+                            key: ValueKey(index),
+                            margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                            child: ListTile(
+                              trailing: pluginCardTrailing(index),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              onLongPress: () {
+                                if (!isMultiSelectMode) {
+                                  setState(() {
+                                    isMultiSelectMode = true;
+                                    selectedNames.add(plugin.name);
+                                  });
                                 }
-                              });
-                            }
-                          },
-                          selected: selectedNames.contains(plugin.name),
-                          selectedTileColor:
-                              Theme.of(context).colorScheme.primaryContainer,
-                          title: Text(
-                            plugin.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
+                              },
+                              onTap: () {
+                                if (isMultiSelectMode) {
+                                  setState(() {
+                                    if (selectedNames.contains(plugin.name)) {
+                                      selectedNames.remove(plugin.name);
+                                      if (selectedNames.isEmpty) {
+                                        isMultiSelectMode = false;
+                                      }
+                                    } else {
+                                      selectedNames.add(plugin.name);
+                                    }
+                                  });
+                                }
+                              },
+                              selected: selectedNames.contains(plugin.name),
+                              selectedTileColor: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer,
+                              title: Text(
+                                plugin.name,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold),
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    'Version: ${plugin.version}',
-                                    style: const TextStyle(color: Colors.grey),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'Version: ${plugin.version}',
+                                        style:
+                                            const TextStyle(color: Colors.grey),
+                                      ),
+                                      if (canUpdate) ...[
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .errorContainer,
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            '可更新',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onErrorContainer,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                      if (pluginsController.validityTracker
+                                          .isSearchValid(plugin.name)) ...[
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .tertiaryContainer,
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            '搜索有效',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onTertiaryContainer,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
-                                  if (canUpdate) ...[
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .errorContainer,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        '可更新',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onErrorContainer,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                  if (pluginsController.validityTracker
-                                      .isSearchValid(plugin.name)) ...[
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .tertiaryContainer,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        '搜索有效',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onTertiaryContainer,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
                                 ],
                               ),
-                              if (pluginsController.installTimeTracker
-                                      .getInstallTime(plugin.name) >
-                                  0) ...[
-                                Text(
-                                  '安装时间: ${DateTime.fromMillisecondsSinceEpoch(pluginsController.installTimeTracker.getInstallTime(plugin.name)).toString().split('.')[0]}',
-                                  style: const TextStyle(color: Colors.grey),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ));
-                      }
-                  );
+                            ));
+                      });
                 });
         }),
       ),
@@ -376,83 +378,154 @@ class _PluginViewPageState extends State<PluginViewPage> {
     ]);
   }
 
-  Widget popupMenuButton(int index){
+  Widget popupMenuButton(int index) {
     final plugin = pluginsController.pluginList[index];
-    return PopupMenuButton<String>(
-      onSelected: (String result) async {
-        if (result == 'Update') {
-          var state = pluginsController.pluginUpdateStatus(plugin);
-          if (state == "nonexistent") {
-            KazumiDialog.showToast(message: '规则仓库中没有当前规则');
-          } else if (state == "latest") {
-            KazumiDialog.showToast(message: '规则已是最新');
-          } else if (state == "updatable") {
-            KazumiDialog.showLoading(msg: '更新中');
-            int res = await pluginsController.tryUpdatePlugin(plugin);
-            KazumiDialog.dismiss();
-            if (res == 0) {
-              KazumiDialog.showToast(message: '更新成功');
-            } else if (res == 1) {
-              KazumiDialog.showToast(message: 'kazumi版本过低, 此规则不兼容当前版本');
-            } else if (res == 2) {
-              KazumiDialog.showToast(message: '更新规则失败');
+    return MenuAnchor(
+      consumeOutsideTap: true,
+      builder:
+          (BuildContext context, MenuController controller, Widget? child) {
+        return IconButton(
+          onPressed: () {
+            if (controller.isOpen) {
+              controller.close();
+            } else {
+              controller.open();
             }
-          }
-        } else if (result == 'Delete') {
-          setState(() {
-            pluginsController.removePlugin(plugin);
-          });
-        } else if (result == 'Edit') {
-          Modular.to.pushNamed('/settings/plugin/editor', arguments: plugin);
-        } else if (result == 'Share') {
-          KazumiDialog.show(builder: (context) {
-            return AlertDialog(
-              title: const Text('规则链接'),
-              content: SelectableText(
-                Utils.jsonToKazumiBase64(
-                    json.encode(pluginsController.pluginList[index].toJson())),
-                style: const TextStyle(fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => KazumiDialog.dismiss(),
-                  child: Text(
-                    '取消',
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.outline),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(
-                        text: Utils.jsonToKazumiBase64(json.encode(
-                            pluginsController.pluginList[index].toJson()))));
-                    KazumiDialog.dismiss();
-                  },
-                  child: const Text('复制到剪贴板'),
-                ),
-              ],
-            );
-          });
-        }
+          },
+          icon: const Icon(Icons.more_vert),
+        );
       },
-      itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-        const PopupMenuItem<String>(
-          value: 'Update',
-          child: Text('更新'),
+      menuChildren: [
+        MenuItemButton(
+          requestFocusOnHover: false,
+          onPressed: () async {
+            var state = pluginsController.pluginUpdateStatus(plugin);
+            if (state == "nonexistent") {
+              KazumiDialog.showToast(message: '规则仓库中没有当前规则');
+            } else if (state == "latest") {
+              KazumiDialog.showToast(message: '规则已是最新');
+            } else if (state == "updatable") {
+              KazumiDialog.showLoading(msg: '更新中');
+              int res = await pluginsController.tryUpdatePlugin(plugin);
+              KazumiDialog.dismiss();
+              if (res == 0) {
+                KazumiDialog.showToast(message: '更新成功');
+              } else if (res == 1) {
+                KazumiDialog.showToast(message: 'kazumi版本过低, 此规则不兼容当前版本');
+              } else if (res == 2) {
+                KazumiDialog.showToast(message: '更新规则失败');
+              }
+            }
+          },
+          child: Container(
+            height: 48,
+            constraints: BoxConstraints(minWidth: 112),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  Icon(Icons.update_rounded),
+                  SizedBox(width: 8),
+                  Text('更新'),
+                ],
+              ),
+            ),
+          ),
         ),
-        const PopupMenuItem<String>(
-          value: 'Edit',
-          child: Text('编辑'),
+        MenuItemButton(
+          requestFocusOnHover: false,
+          onPressed: () {
+            Modular.to.pushNamed('/settings/plugin/editor', arguments: plugin);
+          },
+          child: Container(
+            height: 48,
+            constraints: BoxConstraints(minWidth: 112),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  Icon(Icons.edit),
+                  SizedBox(width: 8),
+                  Text('编辑'),
+                ],
+              ),
+            ),
+          ),
         ),
-        const PopupMenuItem<String>(
-          value: 'Share',
-          child: Text('分享'),
+        MenuItemButton(
+          requestFocusOnHover: false,
+          onPressed: () {
+            KazumiDialog.show(builder: (context) {
+              return AlertDialog(
+                title: const Text('规则链接'),
+                content: SelectableText(
+                  Utils.jsonToKazumiBase64(json
+                      .encode(pluginsController.pluginList[index].toJson())),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => KazumiDialog.dismiss(),
+                    child: Text(
+                      '取消',
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.outline),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(
+                        text: Utils.jsonToKazumiBase64(
+                          json.encode(
+                            pluginsController.pluginList[index].toJson(),
+                          ),
+                        ),
+                      ));
+                      KazumiDialog.dismiss();
+                    },
+                    child: const Text('复制到剪贴板'),
+                  ),
+                ],
+              );
+            });
+          },
+          child: Container(
+            height: 48,
+            constraints: BoxConstraints(minWidth: 112),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  Icon(Icons.share),
+                  SizedBox(width: 8),
+                  Text('分享'),
+                ],
+              ),
+            ),
+          ),
         ),
-        const PopupMenuItem<String>(
-          value: 'Delete',
-          child: Text('删除'),
+        MenuItemButton(
+          requestFocusOnHover: false,
+          onPressed: () async {
+            setState(() {
+              pluginsController.removePlugin(plugin);
+            });
+          },
+          child: Container(
+            height: 48,
+            constraints: BoxConstraints(minWidth: 112),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  Icon(Icons.delete),
+                  SizedBox(width: 8),
+                  Text('删除'),
+                ],
+              ),
+            ),
+          ),
         ),
       ],
     );
