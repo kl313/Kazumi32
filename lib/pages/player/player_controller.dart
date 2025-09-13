@@ -181,14 +181,7 @@ abstract class _PlayerController with Store {
     if (episodeFromTitle == 0) {
       episodeFromTitle = videoPageController.currentEpisode;
     }
-
-    List<String> titleList = [
-      videoPageController.title,
-      videoPageController.bangumiItem.nameCn,
-      videoPageController.bangumiItem.name
-    ].where((title) => title.isNotEmpty).toList();
-    // 根据标题列表获取弹幕,优先级: 视频源标题 > 番剧中文名 > 番剧日文名
-    getDanDanmaku(titleList, episodeFromTitle);
+    getDanDanmakuByBgmBangumiID(videoPageController.bangumiItem.id, episodeFromTitle);
     mediaPlayer = await createVideoController(offset: offset);
     playerSpeed =
         setting.get(SettingBoxKey.defaultPlaySpeed, defaultValue: 1.0);
@@ -243,7 +236,7 @@ abstract class _PlayerController with Store {
 
     mediaPlayer = Player(
       configuration: PlayerConfiguration(
-        bufferSize: lowMemoryMode ? 20 * 1024 * 1024 : 100 * 1024 * 1024,
+        bufferSize: lowMemoryMode ? 15 * 1024 * 1024 : 1500 * 1024 * 1024,
         osc: false,
         logLevel: MPVLogLevel.info,
       ),
@@ -263,9 +256,8 @@ abstract class _PlayerController with Store {
     // media-kit 默认启用硬盘作为双重缓存，这可以维持大缓存的前提下减轻内存压力
     // media-kit 内部硬盘缓存目录按照 Linux 配置，这导致该功能在其他平台上被损坏
     // 该设置可以在所有平台上正确启用双重缓存
-    // await pp.setProperty("demuxer-cache-dir", await Utils.getPlayerTempPath());
+    await pp.setProperty("demuxer-cache-dir", await Utils.getPlayerTempPath());
     await pp.setProperty("af", "scaletempo2=max-speed=8");
-    await pp.setProperty('cache-on-disk', 'no');
     if (Platform.isAndroid) {
       await pp.setProperty("volume-max", "100");
       if (androidEnableOpenSLES) {
@@ -354,7 +346,6 @@ abstract class _PlayerController with Store {
       KazumiLogger().log(Level.error, '设置播放速度失败 ${e.toString()}');
     }
   }
-
 
   Future<void> setVolume(double value) async {
     value = value.clamp(0.0, 100.0);
@@ -445,11 +436,12 @@ abstract class _PlayerController with Store {
     forwardTime = time;
   }
 
-  Future<void> getDanDanmaku(List<String> titleList, int episode) async {
-    KazumiLogger().log(Level.info, '尝试获取弹幕 $titleList');
+  Future<void> getDanDanmakuByBgmBangumiID(
+      int bgmBangumiID, int episode) async {
+    KazumiLogger().log(Level.info, '尝试获取弹幕 [BgmBangumiID] $bgmBangumiID');
     try {
       danDanmakus.clear();
-      bangumiID = await DanmakuRequest.getBangumiIDByTitles(titleList);
+      bangumiID = await DanmakuRequest.getDanDanBangumiIDByBgmBangumiID(bgmBangumiID);
       var res = await DanmakuRequest.getDanDanmaku(bangumiID, episode);
       addDanmakus(res);
     } catch (e) {
