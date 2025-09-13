@@ -52,14 +52,14 @@
             run: flutter build apk --split-per-abi
             shell: bash
           - name: Package android build output
-            run: cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk Kazumi_android_${env:tag}.apk
+            run: cp build/app/outputs/flutter-apk/app-*release.apk ./
             shell: bash
 
           - name: Upload android outputs
             uses: actions/upload-artifact@v4
             with:
               name: android_outputs
-              path: Kazumi_android_*.apk
+              path: app-*release.apk
 
       flutter-build-windows:
         name: "Release for windows"
@@ -389,7 +389,7 @@
               mkdir build
               mkdir build/unsigned
               mkdir build/signed
-              cp android_outputs/* build/unsigned/Kazumi_android_${{ env.tag }}.apk
+              cp android_outputs/* build/unsigned/
 
           - name: Download iOS build file
             uses: actions/download-artifact@v4
@@ -433,7 +433,10 @@
               BUILD_TOOLS_VERSION: "34.0.0"
 
           - name: Copy Signed android build file
-            run: cp ${{steps.sign_app.outputs.signedReleaseFile}} build/signed/Kazumi_android_${{ env.tag }}.apk
+            run: |
+              cp build/unsigned/app-arm64-v8a-release-signed.apk build/signed/Kazumi_${{ env.tag }}_arm64_v8a.apk
+              cp build/unsigned/app-armeabi-v7a-release-signed.apk build/signed/Kazumi_${{ env.tag }}_armeabi_v7a.apk
+              cp build/unsigned/app-x86_64-release-signed.apk build/signed/Kazumi_${{ env.tag }}_x86_64.apk
 
           - name: Create release
             uses: softprops/action-gh-release@v2
