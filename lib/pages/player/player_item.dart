@@ -40,6 +40,7 @@ class PlayerItem extends StatefulWidget {
     required this.onBackPressed,
     required this.keyboardFocus,
     required this.sendDanmaku,
+    this.disableAnimations = false,
   });
 
   final VoidCallback openMenu;
@@ -49,6 +50,7 @@ class PlayerItem extends StatefulWidget {
   final void Function(BuildContext) onBackPressed;
   final void Function(String) sendDanmaku;
   final FocusNode keyboardFocus;
+  final bool disableAnimations;
 
   @override
   State<PlayerItem> createState() => _PlayerItemState();
@@ -218,6 +220,73 @@ class _PlayerItemState extends State<PlayerItem>
     startHideTimer();
     playerTimer?.cancel();
     playerTimer = getPlayerTimer();
+  }
+
+  // 启用超分辨率（质量档）时弹出提示
+  Future<void> handleSuperResolutionChange(int shaderIndex) async {
+    if (!mounted) return;
+
+    final bool isHighMode = shaderIndex == 3;
+    final bool alreadyShown = setting.get(SettingBoxKey.superResolutionWarn, defaultValue: false);
+
+    if (isHighMode && !alreadyShown) {
+      bool confirmed = false;
+
+      await KazumiDialog.show(builder: (context) {
+        bool dontAskAgain = false;
+
+        return StatefulBuilder(builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('性能提示'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('启用超分辨率（质量档）可能会造成设备卡顿，是否继续？'),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Checkbox(
+                      value: dontAskAgain,
+                      onChanged: (value) => setState(() => dontAskAgain = value ?? false),
+                    ),
+                    const Text('下次不再询问'),
+                  ],
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  if (dontAskAgain) {
+                    await setting.put(SettingBoxKey.superResolutionWarn, true);
+                  }
+                  KazumiDialog.dismiss();
+                },
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  confirmed = true;
+                  if (dontAskAgain) {
+                    await setting.put(SettingBoxKey.superResolutionWarn, true);
+                  }
+                  KazumiDialog.dismiss();
+                },
+                child: const Text('确认'),
+              ),
+            ],
+          );
+        });
+      });
+
+      if (confirmed) {
+        playerController.setShader(shaderIndex);
+      }
+    } else {
+      playerController.setShader(shaderIndex);
+    }
   }
 
   void handleFullscreen() {
@@ -1225,6 +1294,7 @@ class _PlayerItemState extends State<PlayerItem>
                             handleProgressBarDragStart:
                                 handleProgressBarDragStart,
                             handleProgressBarDragEnd: handleProgressBarDragEnd,
+                            handleSuperResolutionChange: handleSuperResolutionChange,
                             animationController: animationController!,
                             keyboardFocus: widget.keyboardFocus,
                             sendDanmaku: widget.sendDanmaku,
@@ -1235,7 +1305,8 @@ class _PlayerItemState extends State<PlayerItem>
                             showSyncPlayRoomCreateDialog:
                                 showSyncPlayRoomCreateDialog,
                             showSyncPlayEndPointSwitchDialog:
-                                showSyncPlayEndPointSwitchDialog,
+                                showSyncPlayEndPointSwitchDialog,                         
+                            disableAnimations: widget.disableAnimations,
                           )
                         : SmallestPlayerItemPanel(
                             onBackPressed: widget.onBackPressed,
@@ -1245,6 +1316,7 @@ class _PlayerItemState extends State<PlayerItem>
                             handleProgressBarDragStart:
                                 handleProgressBarDragStart,
                             handleProgressBarDragEnd: handleProgressBarDragEnd,
+                            handleSuperResolutionChange: handleSuperResolutionChange,
                             animationController: animationController!,
                             keyboardFocus: widget.keyboardFocus,
                             handleHove: _handleHove,
@@ -1256,6 +1328,7 @@ class _PlayerItemState extends State<PlayerItem>
                                 showSyncPlayRoomCreateDialog,
                             showSyncPlayEndPointSwitchDialog:
                                 showSyncPlayEndPointSwitchDialog,
+                            disableAnimations: widget.disableAnimations,
                           ),
                     // 播放器手势控制
                     Positioned.fill(
