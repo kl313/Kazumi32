@@ -224,6 +224,7 @@ class SettingBoxKey {
       danmakuMassive = 'danmakuMassive',
       danmakuArea = 'danmakuArea',
       danmakuColor = 'danmakuColor',
+      danmakuDuration = 'danmakuDuration',
       danmakuEnabledByDefault = 'danmakuEnabledByDefault',
       danmakuBiliBiliSource = 'danmakuBiliBiliSource',
       danmakuGamerSource = 'danmakuGamerSource',
@@ -256,5 +257,6 @@ class SettingBoxKey {
       defaultSuperResolutionType = 'defaultSuperResolutionType',
       superResolutionWarn = 'superResolutionWarn',
       playerDisableAnimations = 'playerDisableAnimations',
-      playerLogLevel = 'playerLogLevel';
+      playerLogLevel = 'playerLogLevel',
+      searchNotShowWatchedBangumis = 'searchNotShowWatchedBangumis';
 }
