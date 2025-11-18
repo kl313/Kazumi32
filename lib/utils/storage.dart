@@ -225,11 +225,13 @@ class SettingBoxKey {
       danmakuArea = 'danmakuArea',
       danmakuColor = 'danmakuColor',
       danmakuDuration = 'danmakuDuration',
+      danmakuLineHeight = 'danmakuLineHeight',
       danmakuEnabledByDefault = 'danmakuEnabledByDefault',
       danmakuBiliBiliSource = 'danmakuBiliBiliSource',
       danmakuGamerSource = 'danmakuGamerSource',
       danmakuDanDanSource = 'danmakuDanDanSource',
       danmakuFontWeight = 'danmakuFontWeight',
+      danmakuFollowSpeed = 'danmakuFollowSpeed',
       themeMode = 'themeMode',
       themeColor = 'themeColor',
       privateMode = 'privateMode',
@@ -240,6 +242,7 @@ class SettingBoxKey {
       displayMode = 'displayMode',
       enableGitProxy = 'enableGitProxy',
       enableSystemProxy = 'enableSystemProxy',
+      /// Deprecated
       isWideScreen = 'isWideScreen',
       webDavEnable = 'webDavEnable',
       webDavEnableHistory = 'webDavEnableHistory',
@@ -258,5 +261,9 @@ class SettingBoxKey {
       superResolutionWarn = 'superResolutionWarn',
       playerDisableAnimations = 'playerDisableAnimations',
       playerLogLevel = 'playerLogLevel',
-      searchNotShowWatchedBangumis = 'searchNotShowWatchedBangumis';
+      searchNotShowWatchedBangumis = 'searchNotShowWatchedBangumis',
+      searchNotShowAbandonedBangumis = 'searchNotShowAbandonedBangumis',
+      timelineNotShowAbandonedBangumis = 'timelineNotShowAbandonedBangumis',
+      timelineNotShowWatchedBangumis = 'timelineNotShowWatchedBangumis',
+      useSystemFont = 'useSystemFont';
 }
