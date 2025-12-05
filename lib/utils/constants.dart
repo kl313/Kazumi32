@@ -223,6 +223,8 @@ final List<String> defaultAnimeTags = const [
     'speed1': ['1'],
     'speed2': ['2'],
     'speed3': ['3'],
+    'speedup': ['X'],
+    'speeddown': ['Z'],
   };
 
 // 键位别名
@@ -241,7 +243,7 @@ final List<String> defaultAnimeTags = const [
 //功能中文名对应
   final Map<String, String> shortcutsChineseName = {
     'playorpause': '播放 / 暂停',
-    'forward': '快进',
+    'forward': '快进 / 长按倍速',
     'rewind': '快退',
     'next': '下一集',
     'prev': '上一集',
@@ -256,4 +258,6 @@ final List<String> defaultAnimeTags = const [
     'speed1': '倍速：1x',
     'speed2': '倍速：2x',
     'speed3': '倍速：3x',
+    'speedup': '倍速加',
+    'speeddown': '倍速减',
   };

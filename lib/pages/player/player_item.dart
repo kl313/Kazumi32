@@ -72,6 +72,7 @@ class _PlayerItemState extends State<PlayerItem>
   final CollectController collectController = Modular.get<CollectController>();
   final MyController myController = Modular.get<MyController>();
   late Map<String, List<String>> keyboardShortcuts;
+  late List<String> keyboardActionsNeedLongPress;
   late Map<String, void Function()> keyboardActions;
 
 
@@ -142,10 +143,13 @@ class _PlayerItemState extends State<PlayerItem>
   }
 
   void _initKeyboardActions(){
+    //需要实现长按的功能列表。
+    keyboardActionsNeedLongPress = ["forward"];
+    //快捷键功能对应表
     keyboardActions = {
       'playorpause': () => playerController.playOrPause(),
-      'forward': () async => handleShortcutSeek('forward'),
-      'rewind': () async => handleShortcutSeek('rewind'),
+      'forward': () async => handleShortcutForwardDown(),
+      'rewind': () async => handleShortcutRewind(),
       'next': () async => handlePreNextEpisode('next'),
       'prev': () async => handlePreNextEpisode('prev'),
       'volumeup': () async => handleShortcutVolumeChange('up'),
@@ -159,15 +163,44 @@ class _PlayerItemState extends State<PlayerItem>
       'speed1': () async => setPlaybackSpeed(1.0),
       'speed2': () async => setPlaybackSpeed(2.0),
       'speed3': () async => setPlaybackSpeed(3.0),
+      'speedup': () async => handleSpeedChange('up'),
+      'speeddown': () async => handleSpeedChange('down'),
+      // 开始对应长按功能
+      // 如需对应长按功能，例如对功能'func'对应长按，请分别添加'funcRepeat'和'funcUp'。
+      'forwardRepeat': () async => handleShortcutForwardRepeat(),
+      'forwardUp' : () async => handleShortcutForwardUp(),
     };
   }
-  bool handleShortcutInput(String keyLabel) {
+  //初始化播放器菜单
+  void _initPlayerMenu(){
+    Utils.initPlayerMenu(keyboardActions);
+  }
+  //销毁播放器菜单
+  void _disposePlayerMenu(){
+    Utils.disposePlayerMenu();
+  }
+  //快捷键按下
+  bool handleShortcutDown(String keyLabel) {
     for (final entry in keyboardShortcuts.entries) {
       final func = entry.key;
       final keys = entry.value;
       if (keys.contains(keyLabel)) {
         final action = keyboardActions[func];
         if (action != null) {
+          action();
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  // 快捷键长按
+  bool handleShortcutLongPress(String keyLabel, String mode) {
+    for (final func in keyboardActionsNeedLongPress){
+      final keys = keyboardShortcuts[func];
+      if (keys?.contains(keyLabel) == true) {
+        final action = keyboardActions[func + mode];
+        if (action != null){
           action();
           return true;
         }
@@ -200,22 +233,14 @@ class _PlayerItemState extends State<PlayerItem>
     widget.changeEpisode(targetEpisode, currentRoad: currentRoad);
   }
 
-  //快进快退快捷键动作
-  Future<void> handleShortcutSeek(String direction) async {
+  //快退快捷键动作
+  Future<void> handleShortcutRewind() async {
     int skipTime = playerController.arrowKeySkipTime;
     int current = playerController.currentPosition.inSeconds;
-    int total = playerController.playerDuration.inSeconds;
     int targetPosition;
 
-    if (direction == 'forward') {
-      targetPosition = current + skipTime;
-      if (targetPosition > total) targetPosition = total;
-    } else if (direction == 'rewind') {
-      targetPosition = current - skipTime;
-      if (targetPosition < 0) targetPosition = 0;
-    } else {
-      return;
-    }
+    targetPosition = current - skipTime;
+    if (targetPosition < 0) targetPosition = 0;
 
     try {
       playerTimer?.cancel();
@@ -223,6 +248,37 @@ class _PlayerItemState extends State<PlayerItem>
       playerTimer = getPlayerTimer();
     } catch (e) {
       KazumiLogger().e('PlayerController: seek failed', error: e);
+    }
+  }
+  // 快进快捷键动作
+  Future<void> handleShortcutForwardDown() async {
+    lastPlayerSpeed = playerController.playerSpeed;
+  }
+  Future<void> handleShortcutForwardRepeat() async {
+    if (playerController.playerSpeed < 2.0) {
+      playerController.showPlaySpeed = true;
+      setPlaybackSpeed(2.0);
+    }
+  }
+  Future<void> handleShortcutForwardUp() async {
+    int skipTime = playerController.arrowKeySkipTime;
+    int current = playerController.currentPosition.inSeconds;
+    int total = playerController.duration.inSeconds;
+    int targetPosition;
+
+    targetPosition = current + skipTime;
+    if (targetPosition > total) targetPosition = total;
+    if (playerController.showPlaySpeed) {
+      playerController.showPlaySpeed = false;
+      setPlaybackSpeed(lastPlayerSpeed);
+    } else {
+      try {
+        playerTimer?.cancel();
+        playerController.seek(Duration(seconds: targetPosition));
+        playerTimer = getPlayerTimer();
+      } catch (e) {
+        KazumiLogger().e('PlayerController: seek failed', error: e);
+      }
     }
   }
 
@@ -474,6 +530,32 @@ class _PlayerItemState extends State<PlayerItem>
 
   Future<void> setPlaybackSpeed(double speed) async {
     await playerController.setPlaybackSpeed(speed);
+  }
+
+
+  Future<void> handleSpeedChange(String type) async{
+    try {
+      final currentSpeed = playerController.playerSpeed;
+      int index = defaultPlaySpeedList.indexOf(currentSpeed);
+      if (type == "up") {
+        if (index < defaultPlaySpeedList.length - 1) {
+          index++;
+          setPlaybackSpeed(defaultPlaySpeedList[index]);
+        } else {
+          KazumiDialog.showToast(message: '已达倍速上限');
+        }
+      } 
+      else if (type == "down") {
+        if (index > 0) {
+          index--;
+          setPlaybackSpeed(defaultPlaySpeedList[index]);
+        } else {
+          KazumiDialog.showToast(message: '已达倍速下限');
+        }
+      }
+    } catch (e) {
+      KazumiLogger().e('PlayerController: speed change failed', error: e);
+    }
   }
 
   Future<void> handleShortcutVolumeChange(String type) async {
@@ -1160,6 +1242,7 @@ class _PlayerItemState extends State<PlayerItem>
     super.initState();
     _loadShortcuts();
     _initKeyboardActions();
+    _initPlayerMenu();
     _fullscreenListener = mobx.reaction<bool>(
       (_) => videoPageController.isFullscreen,
       (_) {
@@ -1227,6 +1310,7 @@ class _PlayerItemState extends State<PlayerItem>
     hideVolumeUITimer?.cancel();
     animationController?.dispose();
     animationController = null;
+    _disposePlayerMenu();
     // Reset player panel state
     playerController.lockPanel = false;
     playerController.showVideoController = true;
@@ -1293,15 +1377,18 @@ class _PlayerItemState extends State<PlayerItem>
                             focusNode: widget.keyboardFocus,
                             autofocus: true,
                             onKeyEvent: (focusNode, KeyEvent event) {
+                              bool handled = false;
+                              final keyLabel = event.logicalKey.keyLabel.isNotEmpty
+                                ? event.logicalKey.keyLabel
+                                : event.logicalKey.debugName ?? '';
                               if (event is KeyDownEvent) {
-                                final keyLabel = event.logicalKey.keyLabel.isNotEmpty
-                                    ? event.logicalKey.keyLabel
-                                    : event.logicalKey.debugName ?? '';
-                                    if (handleShortcutInput(keyLabel)) {
-                                      return KeyEventResult.handled;
-                                    }
-                              } 
-                              return KeyEventResult.ignored;
+                                handled = handleShortcutDown(keyLabel);
+                              } else if (event is KeyRepeatEvent) {
+                                handled = handleShortcutLongPress(keyLabel,"Repeat");
+                              } else if (event is KeyUpEvent) {
+                                handled = handleShortcutLongPress(keyLabel,"Up");
+                              }
+                              return handled ? KeyEventResult.handled : KeyEventResult.ignored;
                             },
                             child: const PlayerItemSurface())),
                     (playerController.isBuffering ||
