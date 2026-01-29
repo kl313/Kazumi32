@@ -19,6 +19,7 @@ import 'package:kazumi/utils/utils.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/shaders/shaders_controller.dart';
 import 'package:kazumi/utils/syncplay.dart';
+import 'package:kazumi/utils/syncplay_endpoint.dart';
 import 'package:kazumi/utils/external_player.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
@@ -314,7 +315,6 @@ abstract class _PlayerController with Store {
       ),
     );
 
-    // 记录播放器内部日志
     playerLog.clear();
     setupPlayerDebugInfoSubscription();
 
@@ -351,9 +351,21 @@ abstract class _PlayerController with Store {
       AudioTrack.auto(),
     );
 
+    // Android 14 及以上使用基于 Vulkan 的 MPV GPU-NEXT 视频输出，着色器性能更好
+    // GPU-NEXT 需要 Vulkan 1.2 支持
+    // 避免 Android 14 及以下设备上部分机型 Vulkan 支持不佳导致的黑屏问题
+    bool enableGPUNext = false;
+    if (Platform.isAndroid) {
+      final int androidSdkVersion = await Utils.getAndroidSdkVersion();
+      if (androidSdkVersion >= 34) {
+        enableGPUNext = true;
+      }
+    }
+
     videoController ??= VideoController(
       mediaPlayer!,
       configuration: VideoControllerConfiguration(
+        vo: enableGPUNext ? 'gpu-next' : null,
         enableHardwareAcceleration: hAenable,
         hwdec: hAenable ? hardwareDecoder : 'no',
         androidAttachSurfaceAfterVideoParameters: false,
@@ -645,10 +657,10 @@ abstract class _PlayerController with Store {
     int syncPlayEndPointPort = 0;
     KazumiLogger().i('SyncPlay: connecting to $syncPlayEndPoint');
     try {
-      final parts = syncPlayEndPoint.split(':');
-      if (parts.length == 2) {
-        syncPlayEndPointHost = parts[0];
-        syncPlayEndPointPort = int.parse(parts[1]);
+      final parsed = parseSyncPlayEndPoint(syncPlayEndPoint);
+      if (parsed != null) {
+        syncPlayEndPointHost = parsed.host;
+        syncPlayEndPointPort = parsed.port;
       }
     } catch (_) {}
     if (syncPlayEndPointHost == '' || syncPlayEndPointPort == 0) {
@@ -662,6 +674,8 @@ abstract class _PlayerController with Store {
         SyncplayClient(host: syncPlayEndPointHost, port: syncPlayEndPointPort);
     try {
       await syncplayController!.connect(enableTLS: enableTLS);
+      KazumiLogger().i(
+          'SyncPlay: connected to $syncPlayEndPointHost:$syncPlayEndPointPort');
       syncplayController!.onGeneralMessage.listen(
         (message) {
           // print('SyncPlay: general message: ${message.toString()}');
@@ -783,6 +797,7 @@ abstract class _PlayerController with Store {
       print('SyncPlay: error: $e');
     }
   }
+
 
   void setSyncPlayCurrentPosition(
       {bool? forceSyncPlaying, double? forceSyncPosition}) {
