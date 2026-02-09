@@ -16,8 +16,7 @@ class WebviewWindowsItemControllerImpel
     await _setupProxy();
     headlessWebview ??= HeadlessWebview();
     await headlessWebview!.run();
-    await headlessWebview!
-        .setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
+    await headlessWebview!.setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
     initEventController.add(true);
   }
 
@@ -56,6 +55,7 @@ class WebviewWindowsItemControllerImpel
     isVideoSourceLoaded = false;
     videoLoadingEventController.add(true);
     subscriptions.add(headlessWebview!.onM3USourceLoaded.listen((data) {
+      if (headlessWebview == null) return;
       String url = data['url'] ?? '';
       if (url.isEmpty) {
         return;
@@ -68,6 +68,7 @@ class WebviewWindowsItemControllerImpel
       videoParserEventController.add((url, offset));
     }));
     subscriptions.add(headlessWebview!.onVideoSourceLoaded.listen((data) {
+      if (headlessWebview == null) return;
       String url = data['url'] ?? '';
       if (url.isEmpty) {
         return;
@@ -89,6 +90,7 @@ class WebviewWindowsItemControllerImpel
         s.cancel();
       } catch (_) {}
     });
+    subscriptions.clear();
     await redirect2Blank();
   }
 
@@ -99,20 +101,23 @@ class WebviewWindowsItemControllerImpel
         s.cancel();
       } catch (_) {}
     });
-    // disposeEnvironment() 内部已通过 headless_instances_.clear() 销毁所有 headless 实例，
-    // 不要额外调用 headlessWebview.dispose()，否则两个异步方法通道调用可能产生竞争，
-    // 导致 disposeEnvironment 先到达原生侧清除实例后，disposeHeadless 找不到条目抛出异常。
+    subscriptions.clear();
+    headlessWebview?.dispose();
     headlessWebview = null;
-    WebviewController.disposeEnvironment();
   }
 
-  // The webview_windows package does not have a method to unload the current page. 
-  // The loadUrl method opens a new tab, which can lead to memory leaks. 
-  // Directly disposing of the webview controller would require reinitialization when switching episodes, which is costly. 
+  // The webview_windows package does not have a method to unload the current page.
+  // The loadUrl method opens a new tab, which can lead to memory leaks.
+  // Directly disposing of the webview controller would require reinitialization when switching episodes, which is costly.
   // Therefore, this method is used to redirect to a blank page instead.
   Future<void> redirect2Blank() async {
-    await headlessWebview!.executeScript('''
-      window.location.href = 'about:blank';
-    ''');
+    if (headlessWebview == null) return;
+    try {
+      await headlessWebview!.executeScript('''
+        window.location.href = 'about:blank';
+      ''');
+    } catch (e) {
+      KazumiLogger().d('WebView: redirect2Blank skipped (likely disposed): $e');
+    }
   }
 }

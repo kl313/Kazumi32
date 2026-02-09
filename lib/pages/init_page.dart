@@ -15,6 +15,7 @@ import 'package:provider/provider.dart';
 import 'package:kazumi/bean/settings/theme_provider.dart';
 import 'package:kazumi/shaders/shaders_controller.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
+import 'package:kazumi/utils/background_download_service.dart';
 
 class InitPage extends StatefulWidget {
   const InitPage({super.key});
@@ -28,7 +29,8 @@ class _InitPageState extends State<InitPage> {
   final CollectController collectController = Modular.get<CollectController>();
   final ShadersController shadersController = Modular.get<ShadersController>();
   final MyController myController = Modular.get<MyController>();
-  final DownloadController downloadController = Modular.get<DownloadController>();
+  final DownloadController downloadController =
+      Modular.get<DownloadController>();
   Box setting = GStorage.setting;
   late final ThemeProvider themeProvider;
 
@@ -46,6 +48,7 @@ class _InitPageState extends State<InitPage> {
     _webDavInit();
     try {
       downloadController.init();
+      _setupBackgroundDownloadNavigation();
     } catch (e) {
       KazumiLogger().e('InitPage: downloadController.init() failed', error: e);
     }
@@ -53,16 +56,66 @@ class _InitPageState extends State<InitPage> {
     await _checkRunningOnX11();
     await _pluginInit();
 
-    _navigateToHome();
+    _startDefaultPage();
     _update();
   }
 
-  void _navigateToHome() {
+  void _setupBackgroundDownloadNavigation() {
+    final backgroundService = BackgroundDownloadService();
+
+    backgroundService.onNavigateToDownloadRequested = () {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        try {
+          if (Modular.to.path.contains('/download')) return;
+          Modular.to.pushNamed('/settings/download/');
+        } catch (e) {
+          KazumiLogger()
+              .w('InitPage: failed to navigate to download page', error: e);
+        }
+      });
+    };
+
+    backgroundService.onNotificationPermissionRequired = () async {
+      final result = await KazumiDialog.show<bool>(
+        clickMaskDismiss: false,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('需要通知权限'),
+            content: const Text(
+              '开启通知权限后，可以在后台下载时显示进度，并防止系统终止下载任务。\n\n'
+              '如果拒绝，下载功能仍可使用，但在后台时可能被系统中断。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => KazumiDialog.dismiss(popWith: false),
+                child: Text(
+                  '稍后再说',
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.outline),
+                ),
+              ),
+              TextButton(
+                onPressed: () => KazumiDialog.dismiss(popWith: true),
+                child: const Text('允许'),
+              ),
+            ],
+          );
+        },
+      );
+      return result ?? false;
+    };
+  }
+
+  void _startDefaultPage() {
+    final defaultStartupPage = setting.get(
+      SettingBoxKey.defaultStartupPage,
+      defaultValue: '/tab/popular/',
+    );
     // Workaround for dynamic_color. dynamic_color need PlatformChannel to get color, it takes time.
     // setDynamic here to avoid white screen flash when themeMode is dark.
     themeProvider.setDynamic(
         setting.get(SettingBoxKey.useDynamicColor, defaultValue: false));
-    Modular.to.navigate('/tab/popular/');
+    Modular.to.navigate(defaultStartupPage);
   }
 
   // migrate collect from old version (favorites)

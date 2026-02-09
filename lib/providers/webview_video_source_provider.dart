@@ -10,16 +10,14 @@ import 'package:kazumi/providers/video_source_provider.dart';
 /// 仅在 [dispose] 时才真正销毁 WebView。
 class WebViewVideoSourceProvider implements IVideoSourceProvider {
   WebviewItemController? _webview;
-  StreamSubscription? _subscription;
   StreamSubscription? _logSubscription;
-  Completer<VideoSource>? _completer;
-  
+
   /// 单个 Provider 实例不能实现并发解析，单个 Provider 实例只能持有一个 Webview
   /// 但是 Provider 可以在正在进行的解析未完成时，取消该解析并开始新的解析
   /// 通过递增 ID 标识最新请求，取消旧请求
-  int resolveId = 0;
+  int _resolveId = 0;
 
-  final StreamController<String> _logController = 
+  final StreamController<String> _logController =
       StreamController<String>.broadcast();
   Stream<String> get onLog => _logController.stream;
 
@@ -30,19 +28,13 @@ class WebViewVideoSourceProvider implements IVideoSourceProvider {
     int offset = 0,
     Duration timeout = const Duration(seconds: 15),
   }) async {
-    resolveId++;
-    final currentResolveId = resolveId;
-    if (_completer != null && !_completer!.isCompleted) {
-      _completer!.completeError(const VideoSourceCancelledException());
-    }
-    await _subscription?.cancel();
-    _subscription = null;
+    _resolveId++;
+    final currentResolveId = _resolveId;
 
-    // 复用或初始化 WebView
     if (_webview == null) {
       _webview = WebviewItemControllerFactory.getController();
       await _webview!.init();
-      
+
       _logSubscription = _webview!.onLog.listen((log) {
         if (!_logController.isClosed) {
           _logController.add(log);
@@ -50,46 +42,46 @@ class WebViewVideoSourceProvider implements IVideoSourceProvider {
       });
     }
 
-    _completer = Completer<VideoSource>();
-
     try {
-      // 订阅视频源解析结果
-      _subscription = _webview!.onVideoURLParser.listen((event) {
-        if (currentResolveId == resolveId && _completer != null && !_completer!.isCompleted) {
-          _completer!.complete(VideoSource(
-            url: event.$1,
-            offset: event.$2,
-            type: VideoSourceType.online,
-          ));
-        }
-      });
-
-      // 加载 URL 并等待解析结果
       await _webview!.loadUrl(
         episodeUrl,
         useLegacyParser,
         offset: offset,
       );
 
-      // 等待结果或超时
-      final result = await _completer!.future.timeout(
+      if (currentResolveId != _resolveId) {
+        throw const VideoSourceCancelledException();
+      }
+
+      final event = await _webview!.onVideoURLParser.first.timeout(
         timeout,
         onTimeout: () {
+          if (currentResolveId != _resolveId) {
+            throw const VideoSourceCancelledException();
+          }
           throw VideoSourceTimeoutException(timeout);
         },
       );
 
-      return result;
+      if (currentResolveId != _resolveId) {
+        throw const VideoSourceCancelledException();
+      }
+
+      return VideoSource(
+        url: event.$1,
+        offset: event.$2,
+        type: VideoSourceType.online,
+      );
     } catch (e) {
-      if (currentResolveId != resolveId) {
+      if (e is VideoSourceCancelledException) {
+        rethrow;
+      }
+      if (currentResolveId != _resolveId) {
         throw const VideoSourceCancelledException();
       }
       rethrow;
     } finally {
-      if (currentResolveId == resolveId) {
-        await _subscription?.cancel();
-        _subscription = null;
-        _completer = null;
+      if (currentResolveId == _resolveId) {
         await _webview?.unloadPage();
       }
     }
@@ -97,17 +89,12 @@ class WebViewVideoSourceProvider implements IVideoSourceProvider {
 
   @override
   void cancel() {
-    if (_completer != null && !_completer!.isCompleted) {
-      _completer!.completeError(const VideoSourceCancelledException());
-    }
-    _subscription?.cancel();
-    _subscription = null;
+    _resolveId++;
   }
 
   @override
   void dispose() {
     cancel();
-    _completer = null;
     _logSubscription?.cancel();
     _logSubscription = null;
     _logController.close();
