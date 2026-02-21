@@ -23,6 +23,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
   late int defaultDanmakuFontWeight;
   late double defaultDanmakuDuration;
   late double defaultDanmakuLineHeight;
+  late double defaultdanmakuBorderSize;
   final PopularController popularController = Modular.get<PopularController>();
   late bool danmakuBorder;
   late bool danmakuTop;
@@ -30,6 +31,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
   late bool danmakuScroll;
   late bool danmakuColor;
   late bool danmakuMassive;
+  late bool danmakuDeduplication;
   late bool danmakuBiliBiliSource;
   late bool danmakuGamerSource;
   late bool danmakuDanDanSource;
@@ -52,6 +54,8 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
         setting.get(SettingBoxKey.danmakuLineHeight, defaultValue: 1.6);
     danmakuBorder =
         setting.get(SettingBoxKey.danmakuBorder, defaultValue: true);
+    defaultdanmakuBorderSize = 
+        setting.get(SettingBoxKey.danmakuBorderSize, defaultValue: 1.5);
     danmakuTop = setting.get(SettingBoxKey.danmakuTop, defaultValue: true);
     danmakuBottom =
         setting.get(SettingBoxKey.danmakuBottom, defaultValue: false);
@@ -60,6 +64,8 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     danmakuColor = setting.get(SettingBoxKey.danmakuColor, defaultValue: true);
     danmakuMassive =
         setting.get(SettingBoxKey.danmakuMassive, defaultValue: false);
+    danmakuDeduplication = 
+        setting.get(SettingBoxKey.danmakuDeduplication, defaultValue: false);
     danmakuBiliBiliSource =
         setting.get(SettingBoxKey.danmakuBiliBiliSource, defaultValue: true);
     danmakuGamerSource =
@@ -116,6 +122,13 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     await setting.put(SettingBoxKey.danmakuFontWeight, i);
     setState(() {
       defaultDanmakuFontWeight = i;
+    });
+  }
+
+  void updateDanmakuBorderSize(double i) async {
+    await setting.put(SettingBoxKey.danmakuBorderSize, i);
+    setState(() {
+      defaultdanmakuBorderSize = i;
     });
   }
 
@@ -271,6 +284,17 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                   description: Text('弹幕过多时进行叠加绘制', style: TextStyle(fontFamily: fontFamily)),
                   initialValue: danmakuMassive,
                 ),
+                SettingsTile.switchTile(
+                  onToggle: (value) async {
+                    danmakuDeduplication = value ?? !danmakuDeduplication;
+                    await setting.put(
+                        SettingBoxKey.danmakuDeduplication, danmakuDeduplication);
+                    setState(() {});
+                  },
+                  title: Text('弹幕去重', style: TextStyle(fontFamily: fontFamily)),
+                  description: Text('相同内容弹幕过多时合并为一条弹幕', style: TextStyle(fontFamily: fontFamily)),
+                  initialValue: danmakuDeduplication,
+                ),
               ],
             ),
             SettingsSection(
@@ -285,6 +309,19 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                   },
                   title: Text('弹幕描边', style: TextStyle(fontFamily: fontFamily)),
                   initialValue: danmakuBorder,
+                ),
+                SettingsTile(
+                  title: Text('弹幕描边粗细', style: TextStyle(fontFamily: fontFamily)),
+                  description: Slider(
+                    value: defaultdanmakuBorderSize,
+                    min: 0.1,
+                    max: 3,
+                    divisions: 29,
+                    label: defaultdanmakuBorderSize.toStringAsFixed(1),
+                    onChanged: (value) {
+                      updateDanmakuBorderSize(double.parse(value.toStringAsFixed(1)));
+                    },
+                  ),
                 ),
                 SettingsTile.switchTile(
                   onToggle: (value) async {
