@@ -322,6 +322,7 @@ class SettingBoxKey {
       syncPlayEndPoint = 'syncPlayEndPoint',
       androidEnableOpenSLES = 'androidEnableOpenSLES',
       androidVideoRenderer = 'androidVideoRenderer',
+      androidAutoEnterPIP = 'androidAutoEnterPIP',
       defaultSuperResolutionType = 'defaultSuperResolutionType',
       superResolutionWarn = 'superResolutionWarn',
       playerDisableAnimations = 'playerDisableAnimations',
@@ -332,6 +333,7 @@ class SettingBoxKey {
       timelineNotShowWatchedBangumis = 'timelineNotShowWatchedBangumis',
       useSystemFont = 'useSystemFont',
       forceAdBlocker = 'forceAdBlocker',
+      backgroundPlayback = 'backgroundPlayback',
       proxyEnable = 'proxyEnable',
       proxyConfigured = 'proxyConfigured',
       proxyUrl = 'proxyUrl',
@@ -339,5 +341,6 @@ class SettingBoxKey {
       showRating = 'showRating',
       downloadParallelEpisodes = 'downloadParallelEpisodes',
       downloadParallelSegments = 'downloadParallelSegments',
-      downloadDanmaku = 'downloadDanmaku';
+      downloadDanmaku = 'downloadDanmaku',
+      shortcutDialogShown = 'shortcutDialogShown';
 }

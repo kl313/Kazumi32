@@ -53,7 +53,7 @@ abstract class _VideoPageController with Store {
   @observable
   bool isCommentsAscending = false;
 
-  /// 画中画状态
+  /// 桌面画中画状态，Android 画中画状态不需要单独维护，进入画中画后会直接切换到系统的全局播放器界面
   @observable
   bool isPip = false;
 
@@ -246,6 +246,8 @@ abstract class _VideoPageController with Store {
       episodeTitle: roadList[currentRoad].identifier[episode - 1],
       referer: '',
       currentRoad: currentRoad,
+      coverUrl: bangumiItem.images['large'],
+      bangumiName: bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
     );
 
     final playerController = Modular.get<PlayerController>();
@@ -306,6 +308,8 @@ abstract class _VideoPageController with Store {
         episodeTitle: roadList[currentRoad].identifier[currentEpisode - 1],
         referer: currentPlugin.referer,
         currentRoad: currentRoad,
+        coverUrl: bangumiItem.images['large'],
+        bangumiName: bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
       );
 
       final playerController = Modular.get<PlayerController>();
