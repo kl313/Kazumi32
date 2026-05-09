@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:hive_ce/hive.dart';
 import 'package:kazumi/utils/logger.dart';
@@ -7,6 +8,7 @@ import 'package:kazumi/modules/bangumi/bangumi_tag.dart';
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/modules/collect/collect_module.dart';
 import 'package:kazumi/modules/collect/collect_change_module.dart';
+import 'package:kazumi/modules/collect/collect_sync_merger.dart';
 import 'package:kazumi/modules/search/search_history_module.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 
@@ -23,6 +25,119 @@ class GStorage {
 
   /// Hive directory path, initialized during init()
   static String? _hivePath;
+
+  /// Queue to serialize write operations
+  static Future<void> _collectChangesWriteQueue = Future.value();
+
+  /// Next ID
+  static int _nextCollectChangeId = 0;
+
+  /// Flag to indicate if the next ID has initialized
+  static bool _collectChangeIdInitialized = false;
+
+  /// Ensure collect-related write sequentially
+  static Future<T> _runCollectChangesWriteExclusive<T>(
+    Future<T> Function() action,
+  ) {
+    final completer = Completer<T>();
+    final previousWrite = _collectChangesWriteQueue;
+
+    _collectChangesWriteQueue = (() async {
+      try {
+        await previousWrite;
+      } catch (_) {}
+
+      try {
+        completer.complete(await action());
+      } catch (e, stackTrace) {
+        completer.completeError(e, stackTrace);
+      }
+    })();
+
+    return completer.future;
+  }
+
+  /// init id generator
+  static void _initializeNextCollectChangeIdLocked() {
+    if (_collectChangeIdInitialized) {
+      return;
+    }
+
+    var maxExistingId = 0;
+    for (final key in collectChanges.keys) {
+      if (key is int && key > maxExistingId) {
+        maxExistingId = key;
+      }
+    }
+
+    _nextCollectChangeId = maxExistingId;
+    _collectChangeIdInitialized = true;
+  }
+
+  /// Generate id for collect change
+  static int _generateCollectChangeIdLocked() {
+    _initializeNextCollectChangeIdLocked();
+
+    final currentSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // Ensure ID is greater than any existing ID, or equal to current timestamp.
+    var nextId = _nextCollectChangeId < currentSeconds
+        ? currentSeconds
+        : _nextCollectChangeId + 1;
+    while (collectChanges.containsKey(nextId)) {
+      nextId++;
+    }
+    _nextCollectChangeId = nextId;
+    return nextId;
+  }
+
+  /// Append a new collect change
+  static Future<CollectedBangumiChange> appendCollectChange({
+    required int bangumiId,
+    required int action,
+    required int type,
+    int? timestamp,
+  }) {
+    return _runCollectChangesWriteExclusive(() async {
+      final change = CollectedBangumiChange(
+        _generateCollectChangeIdLocked(),
+        bangumiId,
+        action,
+        type,
+        timestamp ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000),
+      );
+      await collectChanges.put(change.id, change);
+      await collectChanges.flush();
+      return change;
+    });
+  }
+
+  /// Update an existing collect change
+  static Future<void> putCollectChange(CollectedBangumiChange change) {
+    return _runCollectChangesWriteExclusive(() async {
+      _initializeNextCollectChangeIdLocked();
+      if (change.id > _nextCollectChangeId) {
+        _nextCollectChangeId = change.id;
+      }
+      await collectChanges.put(change.id, change);
+      await collectChanges.flush();
+    });
+  }
+
+  /// Put a collectible using the same write queue
+  static Future<void> putCollectible(CollectedBangumi collectible) {
+    return _runCollectChangesWriteExclusive(() async {
+      await collectibles.put(collectible.bangumiItem.id, collectible);
+      await collectibles.flush();
+    });
+  }
+
+  /// Delete a collectible using the shared collect write queue.
+  static Future<void> deleteCollectible(int bangumiId) {
+    return _runCollectChangesWriteExclusive(() async {
+      await collectibles.delete(bangumiId);
+      await collectibles.flush();
+    });
+  }
 
   static Future init() async {
     _hivePath = '${(await getApplicationSupportDirectory()).path}/hive';
@@ -42,7 +157,8 @@ class GStorage {
     collectibles = await _openBoxSafe<CollectedBangumi>('collectibles');
     histories = await _openBoxSafe<History>('histories');
     setting = await _openBoxSafe<dynamic>('setting');
-    collectChanges = await _openBoxSafe<CollectedBangumiChange>('collectchanges');
+    collectChanges =
+        await _openBoxSafe<CollectedBangumiChange>('collectchanges');
     shieldList = await _openBoxSafe<String>('shieldList');
     searchHistory = await _openBoxSafe<SearchHistory>('searchHistory');
     downloads = await _openBoxSafe<DownloadRecord>('downloads');
@@ -54,7 +170,9 @@ class GStorage {
     try {
       return await Hive.openBox<T>(boxName);
     } catch (e) {
-      KazumiLogger().e('GStorage: Box "$boxName" corrupted, attempting recovery', error: e);
+      KazumiLogger().e(
+          'GStorage: Box "$boxName" corrupted, attempting recovery',
+          error: e);
 
       // Delete the corrupted box files
       await _deleteBoxFiles(boxName);
@@ -62,10 +180,12 @@ class GStorage {
       // Try to open again (will create a new empty box)
       try {
         final box = await Hive.openBox<T>(boxName);
-        KazumiLogger().i('GStorage: Box "$boxName" recovered successfully (data lost)');
+        KazumiLogger()
+            .i('GStorage: Box "$boxName" recovered successfully (data lost)');
         return box;
       } catch (e2) {
-        KazumiLogger().e('GStorage: Failed to recover box "$boxName"', error: e2);
+        KazumiLogger()
+            .e('GStorage: Failed to recover box "$boxName"', error: e2);
         rethrow;
       }
     }
@@ -88,7 +208,8 @@ class GStorage {
         KazumiLogger().i('GStorage: Deleted lock file: $boxName.lock');
       }
     } catch (e) {
-      KazumiLogger().e('GStorage: Failed to delete box files for "$boxName"', error: e);
+      KazumiLogger()
+          .e('GStorage: Failed to delete box files for "$boxName"', error: e);
     }
   }
 
@@ -180,83 +301,30 @@ class GStorage {
   static Future<void> patchCollectibles(
       List<CollectedBangumi> remoteCollectibles,
       List<CollectedBangumiChange> remoteChanges) async {
-    List<CollectedBangumi> localCollectibles = collectibles.values.toList();
-    List<CollectedBangumiChange> localChanges = collectChanges.values.toList();
+    await _runCollectChangesWriteExclusive(() async {
+      final mergeResult = CollectSyncMerger.mergeWebDav(
+        localCollectibles: collectibles.values.toList(),
+        localChanges: collectChanges.values.toList(),
+        remoteCollectibles: remoteCollectibles,
+        remoteChanges: remoteChanges,
+      );
 
-    final List<CollectedBangumiChange> newLocalChanges =
-        localChanges.where((localChange) {
-      return !remoteChanges
-          .any((remoteChange) => remoteChange.id == localChange.id);
-    }).toList();
-
-    newLocalChanges.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-    // Process local changes
-    for (var change in newLocalChanges) {
-      // For delete action, we don't need to look up the local collectible.
-      // We can directly remove the item from the remote list.
-      if (change.action == 3) {
-        // Action 3: delete
-        remoteCollectibles
-            .removeWhere((b) => b.bangumiItem.id == change.bangumiID);
-      } else {
-        // For add/update, we still need to look up the local collectible.
-        final changedBangumiID = change.bangumiID.toString();
-        for (var localCollect in localCollectibles) {
-          if (localCollect.bangumiItem.id.toString() == changedBangumiID) {
-            if (change.action == 1) {
-              // Action 1: add
-              final exists = remoteCollectibles
-                  .any((b) => b.bangumiItem.id == localCollect.bangumiItem.id);
-              if (!exists) {
-                remoteCollectibles.add(localCollect);
-              } else {
-                final index = remoteCollectibles.indexWhere(
-                    (b) => b.bangumiItem.id == localCollect.bangumiItem.id);
-                localCollect.type = change.type;
-                if (index != -1) {
-                  // Update the entry with local data.
-                  remoteCollectibles[index] = localCollect;
-                }
-              }
-            } else if (change.action == 2) {
-              // Action 2: update
-              final index = remoteCollectibles.indexWhere(
-                  (b) => b.bangumiItem.id == localCollect.bangumiItem.id);
-              localCollect.type = change.type;
-              if (index != -1) {
-                // Update the entry with local data.
-                remoteCollectibles[index] = localCollect;
-              }
-            }
-            break;
-          }
-        }
+      // Update local storage
+      await collectibles.clear();
+      for (var collect in mergeResult.collectibles) {
+        await collectibles.put(collect.bangumiItem.id, collect);
       }
-    }
+      await collectibles.flush();
 
-    // merge local changes with remote changes
-    final Map<int, CollectedBangumiChange> mergedMap = {};
-    for (var change in remoteChanges) {
-      mergedMap[change.id] = change;
-    }
-    for (var change in newLocalChanges) {
-      if (!mergedMap.containsKey(change.id)) {
-        mergedMap[change.id] = change;
+      await collectChanges.clear();
+      for (var change in mergeResult.changes) {
+        await collectChanges.put(change.id, change);
       }
-    }
-    final List<CollectedBangumiChange> mergedChanges =
-        mergedMap.values.toList();
+      await collectChanges.flush();
 
-    // Update local storage
-    await collectibles.clear();
-    for (var collect in remoteCollectibles) {
-      await collectibles.put(collect.bangumiItem.id, collect);
-    }
-    await collectChanges.clear();
-    for (var change in mergedChanges) {
-      await collectChanges.put(change.id, change);
-    }
+      _collectChangeIdInitialized = false;
+      _initializeNextCollectChangeIdLocked();
+    });
   }
 
   // Prevent instantiation
@@ -306,6 +374,7 @@ class SettingBoxKey {
       enableGitProxy = 'enableGitProxy',
       enableSystemProxy = 'enableSystemProxy',
       defaultStartupPage = 'defaultStartupPage',
+
       /// Deprecated
       isWideScreen = 'isWideScreen',
       webDavEnable = 'webDavEnable',
@@ -331,6 +400,7 @@ class SettingBoxKey {
       searchNotShowAbandonedBangumis = 'searchNotShowAbandonedBangumis',
       timelineNotShowAbandonedBangumis = 'timelineNotShowAbandonedBangumis',
       timelineNotShowWatchedBangumis = 'timelineNotShowWatchedBangumis',
+      timelineOnlyShowWatchingBangumis = 'timelineOnlyShowWatchingBangumis',
       useSystemFont = 'useSystemFont',
       forceAdBlocker = 'forceAdBlocker',
       backgroundPlayback = 'backgroundPlayback',
@@ -342,5 +412,13 @@ class SettingBoxKey {
       downloadParallelEpisodes = 'downloadParallelEpisodes',
       downloadParallelSegments = 'downloadParallelSegments',
       downloadDanmaku = 'downloadDanmaku',
-      shortcutDialogShown = 'shortcutDialogShown';
+      shortcutDialogShown = 'shortcutDialogShown',
+      bangumiSyncEnable = 'bangumiSyncEnable',
+      bangumiAccessToken = 'bangumiAccessToken',
+      bangumiSyncPriority = 'bangumiSyncPriority',
+      bangumiImmediateSyncToastEnable = 'bangumiImmediateSyncToastEnable',
+      brightnessVolumeGesture = 'brightnessVolumeGesture',
+      historySyncDeviceId = 'historySyncDeviceId',
+      historySyncSequence = 'historySyncSequence',
+      historySyncSnapshotInitialized = 'historySyncSnapshotInitialized';
 }

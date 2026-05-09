@@ -4,12 +4,12 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
-import 'package:kazumi/request/api.dart';
+import 'package:kazumi/request/config/api_endpoints.dart';
+import 'package:kazumi/request/clients/github_client.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/logger.dart';
 import 'package:kazumi/utils/mortis.dart';
@@ -218,12 +218,15 @@ class Utils {
   static bool needUpdate(localVersion, remoteVersion) {
     List<String> localVersionList = localVersion.split('.');
     List<String> remoteVersionList = remoteVersion.split('.');
-    for (int i = 0; i < localVersionList.length; i++) {
-      int localVersion = int.parse(localVersionList[i]);
-      int remoteVersion = int.parse(remoteVersionList[i]);
-      if (remoteVersion > localVersion) {
+    final maxLength = max(localVersionList.length, remoteVersionList.length);
+    for (int i = 0; i < maxLength; i++) {
+      final int localSegment =
+          i < localVersionList.length ? int.parse(localVersionList[i]) : 0;
+      final int remoteSegment =
+          i < remoteVersionList.length ? int.parse(remoteVersionList[i]) : 0;
+      if (remoteSegment > localSegment) {
         return true;
-      } else if (remoteVersion < localVersion) {
+      } else if (remoteSegment < localSegment) {
         return false;
       }
     }
@@ -266,16 +269,20 @@ class Utils {
     }
   }
 
+  /// 格式化相似度为百分比字符串，默认为1位小数，空值时返回 `--`
+  static String formatTraceSimilarity(double? similarity,
+      {int fractionDigits = 1, String empty = '--'}) {
+    if (similarity == null) {
+      return empty;
+    }
+    return '${(similarity * 100).toStringAsFixed(fractionDigits)}%';
+  }
+
   static Future<String> latest() async {
     try {
-      var resp = await Dio().get<Map<String, dynamic>>(Api.latestApp);
-      if (resp.data?.containsKey("tag_name") ?? false) {
-        return resp.data!["tag_name"];
-      } else {
-        throw resp.data?["message"];
-      }
+      return await GithubClient.instance.latestVersion();
     } catch (e) {
-      return Api.version;
+      return ApiEndpoints.version;
     }
   }
 
@@ -305,8 +312,8 @@ class Utils {
 
   static List<Danmaku> mergeDuplicateDanmakus(
     List<Danmaku> danmakus, {
-      double timeWindowSeconds = 0,
-    }) {
+    double timeWindowSeconds = 0,
+  }) {
     final Map<String, List<Danmaku>> grouped = {};
 
     // 弹幕规范化处理
@@ -331,10 +338,12 @@ class Utils {
 
       text = text.replaceAll(RegExp(r'\s+'), '');
 
-      text = text.replaceAll(RegExp(
-        r'[^\w\u4e00-\u9fff\u3040-\u309F\u30A0-\u30FF\u31F0-\u31FF\uFF65-\uFF9F]',
-        unicode: true,
-      ),'');
+      text = text.replaceAll(
+          RegExp(
+            r'[^\w\u4e00-\u9fff\u3040-\u309F\u30A0-\u30FF\u31F0-\u31FF\uFF65-\uFF9F]',
+            unicode: true,
+          ),
+          '');
 
       text = text.replaceAllMapped(RegExp(r'(.)\1{2,}'), (match) {
         final char = match.group(1)!;
@@ -384,7 +393,8 @@ class Utils {
           } else {
             result.add(
               Danmaku(
-                message: '${currentGroup.first.message} x${currentGroup.length}',
+                message:
+                    '${currentGroup.first.message} x${currentGroup.length}',
                 time: currentGroup.first.time,
                 type: 5,
                 color: Utils.generateDanmakuColor(0xFFFFFF),

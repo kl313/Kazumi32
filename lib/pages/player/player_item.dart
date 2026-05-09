@@ -24,7 +24,7 @@ import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:kazumi/utils/storage.dart';
-import 'package:kazumi/request/damaku.dart';
+import 'package:kazumi/request/apis/danmaku_api.dart';
 import 'package:kazumi/modules/danmaku/danmaku_search_response.dart';
 import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
 import 'package:kazumi/pages/player/player_item_surface.dart';
@@ -112,6 +112,7 @@ class _PlayerItemState extends State<PlayerItem>
   late bool haEnable;
   late bool autoPlayNext;
   late bool backgroundPlayback;
+  late bool brightnessVolumeGesture;
 
   Timer? hideTimer;
   Timer? playerTimer;
@@ -127,6 +128,7 @@ class _PlayerItemState extends State<PlayerItem>
   int episodeNum = 0;
   bool? _lastPipPlaying;
   bool? _lastPipDanmakuEnabled;
+  late mobx.ReactionDisposer _playerSizeListener;
 
   late mobx.ReactionDisposer _fullscreenListener;
 
@@ -199,7 +201,26 @@ class _PlayerItemState extends State<PlayerItem>
     await PipUtils.updateAndroidPIPActions(
       playing: playing,
       danmakuEnabled: danmakuEnabled,
+      width: playerController.playerWidth,
+      height: playerController.playerHeight,
     );
+  }
+
+  Future<void> _syncPIPAspectWhenVideoSizeReady() async {
+    if (playerController.playerWidth <= 0 ||
+        playerController.playerHeight <= 0) {
+      return;
+    }
+    if (Platform.isAndroid) {
+      await _updateAndroidPIPActions(force: true);
+      return;
+    }
+    if (Utils.isDesktop() && videoPageController.isPip) {
+      await PipUtils.enterDesktopPIPWindow(
+        width: playerController.playerWidth,
+        height: playerController.playerHeight,
+      );
+    }
   }
 
   void _loadShortcuts() {
@@ -454,12 +475,14 @@ class _PlayerItemState extends State<PlayerItem>
     unawaited(_updateAndroidPIPActions(force: true));
   }
 
-  Future<void> _uploadHistoryToWebDav() async {
+  Future<void> _syncHistoryWithWebDav() async {
     if (webDavEnable && webDavEnableHistory) {
       try {
         var webDav = WebDav();
-        await webDav.updateHistory();
-      } catch (_) {}
+        await webDav.syncHistory();
+      } catch (e) {
+        KazumiLogger().w('WebDav: auto history sync failed', error: e);
+      }
     }
   }
 
@@ -474,8 +497,7 @@ class _PlayerItemState extends State<PlayerItem>
       );
       _syncAudioServiceState();
     } catch (e) {
-      KazumiLogger()
-          .w('AudioController: failed to bind callbacks', error: e);
+      KazumiLogger().w('AudioController: failed to bind callbacks', error: e);
     }
   }
 
@@ -539,7 +561,7 @@ class _PlayerItemState extends State<PlayerItem>
     playerController.lockPanel = false;
     playerController.danmakuController.clear();
 
-    await _uploadHistoryToWebDav();
+    await _syncHistoryWithWebDav();
   }
 
   void handleProgressBarDragStart(ThumbDragDetails details) {
@@ -796,12 +818,7 @@ class _PlayerItemState extends State<PlayerItem>
 
   Timer getPlayerTimer() {
     return Timer.periodic(const Duration(seconds: 1), (timer) {
-      playerController.playing = playerController.playerPlaying;
-      playerController.isBuffering = playerController.playerBuffering;
-      playerController.currentPosition = playerController.playerPosition;
-      playerController.buffer = playerController.playerBuffer;
-      playerController.duration = playerController.playerDuration;
-      playerController.completed = playerController.playerCompleted;
+      playerController.syncPlaybackState();
       unawaited(_updateAndroidPIPActions());
       _syncAudioServiceState();
       // 弹幕相关
@@ -873,20 +890,18 @@ class _PlayerItemState extends State<PlayerItem>
       if (playerController.playerPlaying &&
           !videoPageController.loading &&
           !videoPageController.isOfflineMode) {
-        if (!WebDav().isHistorySyncing) {
-          final pluginName = videoPageController.isOfflineMode
-              ? videoPageController.offlinePluginName
-              : videoPageController.currentPlugin.name;
-          historyController.updateHistory(
-              videoPageController.actualEpisodeNumber,
-              videoPageController.currentRoad,
-              pluginName,
-              videoPageController.bangumiItem,
-              playerController.playerPosition,
-              videoPageController.src,
-              videoPageController.roadList[videoPageController.currentRoad]
-                  .identifier[videoPageController.currentEpisode - 1]);
-        }
+        final pluginName = videoPageController.isOfflineMode
+            ? videoPageController.offlinePluginName
+            : videoPageController.currentPlugin.name;
+        historyController.updateHistory(
+            videoPageController.actualEpisodeNumber,
+            videoPageController.currentRoad,
+            pluginName,
+            videoPageController.bangumiItem,
+            playerController.playerPosition,
+            videoPageController.src,
+            videoPageController.roadList[videoPageController.currentRoad]
+                .identifier[videoPageController.currentEpisode - 1]);
       }
       // 自动播放下一集
       if (playerController.completed &&
@@ -916,7 +931,7 @@ class _PlayerItemState extends State<PlayerItem>
     DanmakuEpisodeResponse danmakuEpisodeResponse;
     try {
       danmakuSearchResponse =
-          await DanmakuRequest.getDanmakuSearchResponse(keyword);
+          await DanmakuApi.getDanmakuSearchResponse(keyword);
     } catch (e) {
       KazumiDialog.dismiss();
       KazumiDialog.showToast(message: '弹幕检索错误: ${e.toString()}');
@@ -941,7 +956,7 @@ class _PlayerItemState extends State<PlayerItem>
                   KazumiDialog.showLoading(msg: '弹幕检索中');
                   try {
                     danmakuEpisodeResponse =
-                        await DanmakuRequest.getDanDanEpisodesByDanDanBangumiID(
+                        await DanmakuApi.getDanDanEpisodesByDanDanBangumiID(
                             danmakuInfo.animeId);
                   } catch (e) {
                     KazumiDialog.dismiss();
@@ -1455,6 +1470,12 @@ class _PlayerItemState extends State<PlayerItem>
         _handleFullscreenChange(context);
       },
     );
+    _playerSizeListener = mobx.reaction<String>(
+      (_) => '${playerController.playerWidth}:${playerController.playerHeight}',
+      (_) {
+        unawaited(_syncPIPAspectWhenVideoSizeReady());
+      },
+    );
     if (Platform.isAndroid) {
       PipUtils.initPipHandler(
         onAction: (action) async {
@@ -1523,6 +1544,8 @@ class _PlayerItemState extends State<PlayerItem>
     autoPlayNext = setting.get(SettingBoxKey.autoPlayNext, defaultValue: true);
     backgroundPlayback =
         setting.get(SettingBoxKey.backgroundPlayback, defaultValue: false);
+    brightnessVolumeGesture =
+        setting.get(SettingBoxKey.brightnessVolumeGesture, defaultValue: true);
     unawaited(_bindAudioService());
     playerTimer = getPlayerTimer();
     windowManager.addListener(this);
@@ -1535,6 +1558,7 @@ class _PlayerItemState extends State<PlayerItem>
     // We need to reuse the player after episode is changed and player item is disposed
     // We dispose player after video page disposed
     _fullscreenListener();
+    _playerSizeListener();
     WidgetsBinding.instance.removeObserver(this);
     windowManager.removeListener(this);
     playerTimer?.cancel();
@@ -1604,7 +1628,8 @@ class _PlayerItemState extends State<PlayerItem>
                   }
                 },
                 child: SizedBox(
-                  height: videoPageController.isFullscreen
+                  height: videoPageController.isFullscreen ||
+                          videoPageController.isPip
                       ? (MediaQuery.of(context).size.height)
                       : (MediaQuery.of(context).size.width * 9.0 / (16.0)),
                   width: MediaQuery.of(context).size.width,
@@ -1682,7 +1707,8 @@ class _PlayerItemState extends State<PlayerItem>
                       top: 0,
                       left: 0,
                       right: 0,
-                      height: videoPageController.isFullscreen
+                      height: videoPageController.isFullscreen ||
+                              videoPageController.isPip
                           ? MediaQuery.sizeOf(context).height
                           : (MediaQuery.sizeOf(context).width * 9 / 16),
                       child: DanmakuScreen(
@@ -1819,6 +1845,9 @@ class _PlayerItemState extends State<PlayerItem>
                               },
                               onVerticalDragUpdate:
                                   (DragUpdateDetails details) async {
+                                if (!brightnessVolumeGesture) {
+                                  return;
+                                }
                                 final double totalWidth =
                                     MediaQuery.sizeOf(context).width;
                                 final double totalHeight =
@@ -1851,6 +1880,9 @@ class _PlayerItemState extends State<PlayerItem>
                                 }
                               },
                               onVerticalDragEnd: (_) {
+                                if (!brightnessVolumeGesture) {
+                                  return;
+                                }
                                 if (playerController.volumeSeeking) {
                                   playerController.volumeSeeking = false;
                                   Future.delayed(const Duration(seconds: 1),
