@@ -766,7 +766,7 @@ class AutoUpdater {
       case InstallationType.macosDmg:
         return ['macos', '.dmg'];
       case InstallationType.androidApk:
-        return ['android', '.apk'];
+        return ['arm64_v8a.apk'];
       // 以下类型直接跳转到 GitHub Release 页面，不需要下载文件
       case InstallationType.linuxDeb:
       case InstallationType.linuxTar:
