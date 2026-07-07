@@ -1,7 +1,6 @@
 // ignore_for_file: library_private_types_in_public_api
 
 import 'package:canvas_danmaku/canvas_danmaku.dart' as canvas;
-import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
 import 'package:kazumi/pages/player/controller/player_models.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
@@ -88,14 +87,15 @@ class DanmakuTimeline {
 abstract class _PlayerDanmakuController with Store {
   _PlayerDanmakuController({
     required this.isLocalPlayback,
+    required this.downloadController,
   });
 
   final bool Function() isLocalPlayback;
+  final DownloadController downloadController;
 
   late canvas.DanmakuController canvasController;
 
-  @observable
-  Map<int, List<DanmakuEntry>> danDanmakus = {};
+  final Map<int, List<DanmakuEntry>> danDanmakus = {};
   @observable
   bool danmakuOn = false;
   @observable
@@ -127,6 +127,11 @@ abstract class _PlayerDanmakuController with Store {
     return danDanmakus[danmakuSecond] ?? const [];
   }
 
+  @action
+  void setDanmakuEnabled(bool value) {
+    danmakuOn = value;
+  }
+
   void clearAndInvalidateScheduledDanmakus() {
     _scheduledDanmakuGeneration++;
     canvasController.clear();
@@ -152,11 +157,13 @@ abstract class _PlayerDanmakuController with Store {
     );
   }
 
+  @action
   void beginDanmakuLoad() {
     danDanmakus.clear();
     danmakuLoading = true;
   }
 
+  @action
   void applyDanmakuLoad(
     DanmakuLoadResult result, {
     required bool enableDanmaku,
@@ -167,6 +174,7 @@ abstract class _PlayerDanmakuController with Store {
     danmakuLoading = false;
   }
 
+  @action
   void applyUnavailableDanmakuLoad(DanmakuLoadResult result) {
     bangumiID = result.bangumiID;
     danDanmakus.clear();
@@ -174,6 +182,7 @@ abstract class _PlayerDanmakuController with Store {
     danmakuLoading = false;
   }
 
+  @action
   void finishDanmakuLoad({bool disableDanmaku = false}) {
     if (disableDanmaku) {
       danDanmakus.clear();
@@ -188,7 +197,6 @@ abstract class _PlayerDanmakuController with Store {
         'PlayerController: attempting to load cached danmaku for episode $episode');
     var nextBangumiID = bangumiID;
     try {
-      final downloadController = Modular.get<DownloadController>();
       final cachedDanmakus = await downloadController.getCachedDanmakus(
         bangumiId,
         pluginName,
@@ -289,6 +297,7 @@ abstract class _PlayerDanmakuController with Store {
     return DanmakuLoadResult.failed(bangumiID: nextBangumiID);
   }
 
+  @action
   Future<bool> getDanDanmakuByEpisodeID(int episodeID) async {
     KazumiLogger().i('PlayerController: attempting to get danmaku $episodeID');
     danmakuLoading = true;
@@ -313,11 +322,9 @@ abstract class _PlayerDanmakuController with Store {
         ? mergeDuplicateDanmakus(danmakus, timeWindowSeconds: 5)
         : danmakus;
 
-    for (var element in listToAdd) {
-      var danmakuList =
-          danDanmakus[element.time.toInt()] ?? List.empty(growable: true);
-      danmakuList.add(element);
-      danDanmakus[element.time.toInt()] = danmakuList;
+    for (final element in listToAdd) {
+      final danmakuSecond = element.time.toInt();
+      (danDanmakus[danmakuSecond] ??= <DanmakuEntry>[]).add(element);
     }
   }
 

@@ -8,7 +8,12 @@ import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/services/storage/storage.dart';
 
 class PluginShopPage extends StatefulWidget {
-  const PluginShopPage({super.key});
+  const PluginShopPage({
+    super.key,
+    required this.controller,
+  });
+
+  final PluginsController controller;
 
   @override
   State<PluginShopPage> createState() => _PluginShopPageState();
@@ -21,7 +26,7 @@ class _PluginShopPageState extends State<PluginShopPage> {
 
   // 排序方式状态：false=按更新时间排序，true=按名称排序
   bool sortByName = false;
-  final PluginsController pluginsController = Modular.get<PluginsController>();
+  PluginsController get pluginsController => widget.controller;
 
   void onBackPressed(BuildContext context) {
     if (KazumiDialog.observer.hasKazumiDialog) {
@@ -111,22 +116,6 @@ class _PluginShopPageState extends State<PluginShopPage> {
                                 color: Theme.of(context).colorScheme.surface),
                           ),
                         ),
-                        const SizedBox(width: 5),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8.0, vertical: 1.0),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary,
-                            borderRadius: BorderRadius.circular(16.0),
-                          ),
-                          child: Text(
-                            sortedList[index].useNativePlayer
-                                ? "native"
-                                : "webview",
-                            style: TextStyle(
-                                color: Theme.of(context).colorScheme.surface),
-                          ),
-                        ),
                         if (sortedList[index].antiCrawlerEnabled) ...[
                           const SizedBox(width: 5),
                           Container(
@@ -167,7 +156,8 @@ class _PluginShopPageState extends State<PluginShopPage> {
                         setState(() {});
                       } else if (res == 1) {
                         KazumiDialog.showToast(
-                            message: 'kazumi版本过低, 此规则不兼容当前版本');
+                          message: '规则需要更高版本客户端',
+                        );
                       } else if (res == 2) {
                         KazumiDialog.showToast(message: '导入规则失败');
                       }
@@ -182,7 +172,8 @@ class _PluginShopPageState extends State<PluginShopPage> {
                         setState(() {});
                       } else if (res == 1) {
                         KazumiDialog.showToast(
-                            message: 'kazumi版本过低, 此规则不兼容当前版本');
+                          message: '规则需要更高版本客户端',
+                        );
                       } else if (res == 2) {
                         KazumiDialog.showToast(message: '更新规则失败');
                       }
@@ -211,7 +202,7 @@ class _PluginShopPageState extends State<PluginShopPage> {
         actions: [
           GeneralErrorButton(
             onPressed: () {
-              Modular.to.pushNamed('/settings/webdav/');
+              context.pushNamed('/settings/webdav/');
             },
             text: enableGitProxy ? '禁用规则镜像' : '启用规则镜像',
           ),

@@ -33,10 +33,9 @@ class SourceSheet extends StatefulWidget {
 
 class _SourceSheetState extends State<SourceSheet>
     with SingleTickerProviderStateMixin {
-  final VideoPageController videoPageController =
-      Modular.get<VideoPageController>();
-  final CollectController collectController = Modular.get<CollectController>();
-  final PluginsController pluginsController = Modular.get<PluginsController>();
+  final VideoPageController videoPageController = inject<VideoPageController>();
+  final CollectController collectController = inject<CollectController>();
+  final PluginsController pluginsController = inject<PluginsController>();
   late String keyword;
 
   /// Concurrent plugin search service.
@@ -53,8 +52,10 @@ class _SourceSheetState extends State<SourceSheet>
     keyword = widget.infoController.bangumiItem.nameCn == ''
         ? widget.infoController.bangumiItem.name
         : widget.infoController.bangumiItem.nameCn;
-    pluginSearchService =
-        PluginSearchService(infoController: widget.infoController);
+    pluginSearchService = PluginSearchService(
+      infoController: widget.infoController,
+      pluginsController: pluginsController,
+    );
     pluginSearchService?.queryAllSource(keyword);
     super.initState();
   }
@@ -373,8 +374,8 @@ class _SourceSheetState extends State<SourceSheet>
                   TextButton(
                     style: TextButton.styleFrom(
                       minimumSize: Size.zero,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 10),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                       textStyle: Theme.of(context).textTheme.bodySmall,
@@ -385,8 +386,8 @@ class _SourceSheetState extends State<SourceSheet>
                   TextButton(
                     style: TextButton.styleFrom(
                       minimumSize: Size.zero,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 10),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                       textStyle: Theme.of(context).textTheme.bodySmall,
@@ -535,11 +536,16 @@ class _SourceSheetState extends State<SourceSheet>
                 IconButton(
                   onPressed: () {
                     int currentIndex = widget.tabController.index;
+                    final currentPlugin =
+                        pluginsController.pluginList[currentIndex];
+                    final targetUrl = currentPlugin.usesApiSearch
+                        ? currentPlugin.baseUrl
+                        : currentPlugin.searchURL.replaceFirst(
+                            '@keyword',
+                            Uri.encodeQueryComponent(keyword),
+                          );
                     launchUrl(
-                      Uri.parse(pluginsController
-                          .pluginList[currentIndex].searchURL
-                          .replaceFirst(
-                              '@keyword', Uri.encodeQueryComponent(keyword))),
+                      Uri.parse(targetUrl),
                       mode: LaunchMode.externalApplication,
                     );
                   },
@@ -585,7 +591,8 @@ class _SourceSheetState extends State<SourceSheet>
                                     await videoPageController.queryRoads(
                                         searchItem.src, plugin.name);
                                     KazumiDialog.dismiss();
-                                    Modular.to.pushNamed('/video/');
+                                    if (!mounted) return;
+                                    this.context.pushNamed('/video/');
                                   } catch (_) {
                                     KazumiLogger().w(
                                         "PluginSearchService: failed to query video playlist");
