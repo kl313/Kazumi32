@@ -14,6 +14,7 @@ import 'package:kazumi/pages/player/controller/player_panel_controller.dart';
 import 'package:kazumi/pages/player/controller/player_playback_controller.dart';
 import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
 import 'package:kazumi/pages/player/controller/player_syncplay_controller.dart';
+import 'package:kazumi/pages/player/controller/player_screenshot_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
@@ -41,6 +42,7 @@ class PlayerController implements Disposable {
   final AsyncSessionOwner _initializations = AsyncSessionOwner();
   Future<void>? _shutdownFuture;
   final PlayerPanelController panel = PlayerPanelController();
+  final PlayerScreenshotController screenshots = PlayerScreenshotController();
   final PlayerDebugController debug = PlayerDebugController();
 
   late final PlayerDanmakuController danmaku;
@@ -48,6 +50,7 @@ class PlayerController implements Disposable {
     shaderAssetService: shaderAssetService,
     debug: debug,
     videoUrl: () => videoUrl,
+    isLocalPlayback: () => isLocalPlayback,
   );
   late final PlayerSyncPlayController syncplay = PlayerSyncPlayController(
     bangumiId: () => bangumiId,
@@ -201,6 +204,7 @@ class PlayerController implements Disposable {
         params.adBlockerEnabled,
         canInstall: () => initialization.isActive,
         offset: params.offset,
+        videoSourceFormat: params.videoSourceFormat,
       );
     } catch (e) {
       if (initialization.isStale) {
@@ -324,7 +328,7 @@ class PlayerController implements Disposable {
       seeking.seekBy(offset, enableSync: enableSync);
 
   Future<void> _onSeekCompleted(bool enableSync) async {
-    if (syncplay.syncplayController != null) {
+    if (syncplay.hasSession) {
       setSyncPlayCurrentPosition();
       if (enableSync) {
         await requestSyncPlaySync(doSeek: true);
@@ -342,7 +346,7 @@ class PlayerController implements Disposable {
       return;
     }
     playback.playing = false;
-    if (syncplay.syncplayController != null) {
+    if (syncplay.hasSession) {
       setSyncPlayCurrentPosition();
       if (enableSync) {
         await requestSyncPlaySync();
@@ -360,7 +364,7 @@ class PlayerController implements Disposable {
       return;
     }
     playback.playing = true;
-    if (syncplay.syncplayController != null) {
+    if (syncplay.hasSession) {
       setSyncPlayCurrentPosition();
       if (enableSync) {
         await requestSyncPlaySync();
@@ -383,6 +387,7 @@ class PlayerController implements Disposable {
     if (_shutdownFuture != null) {
       return;
     }
+    screenshots.dispose();
     final shutdown = _shutdownResources();
     _shutdownFuture = shutdown;
     unawaited(
@@ -431,13 +436,7 @@ class PlayerController implements Disposable {
     await _releasePlaybackResources();
   }
 
-  Future<Uint8List?> screenshot({String format = 'image/jpeg'}) async {
-    return await playback.screenshot(format: format);
-  }
-
-  Future<Uint8List?> screenshotPng() async {
-    return await playback.screenshotPng();
-  }
+  Future<Uint8List?> screenshotPng() => playback.screenshotPng();
 
   void setButtonForwardTime(int time) {
     playback.buttonSkipTime = time;
@@ -457,13 +456,11 @@ class PlayerController implements Disposable {
       String room,
       String username,
       Future<void> Function(int episode, {int currentRoad, int offset})
-          changeEpisode,
-      {bool enableTLS = true}) async {
+          changeEpisode) async {
     await syncplay.createRoom(
       room,
       username,
       changeEpisode,
-      enableTLS: enableTLS,
     );
   }
 

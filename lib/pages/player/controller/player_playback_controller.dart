@@ -11,8 +11,12 @@ import 'package:kazumi/services/shaders/shader_asset_service.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/network/proxy_utils.dart';
-import 'package:kazumi/services/player/player_screenshot_service.dart';
+import 'package:kazumi/services/network/system_proxy_service.dart';
+import 'package:kazumi/services/player/playback_cache_policy.dart';
+import 'package:kazumi/services/player/player_error_mapper.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/services/video_source/video_source_format.dart';
+import 'package:kazumi/utils/async_serial_queue.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:mobx/mobx.dart';
@@ -56,26 +60,35 @@ abstract class _PlayerPlaybackController with Store {
     required this.shaderAssetService,
     required this.debug,
     required this.videoUrl,
+    required this.isLocalPlayback,
   });
 
   final ShaderAssetService shaderAssetService;
   final PlayerDebugController debug;
   final String Function() videoUrl;
-  final PlayerScreenshotService screenshotService =
-      const PlayerScreenshotService();
+  final bool Function() isLocalPlayback;
+  late final PlaybackCachePolicy cachePolicy = PlaybackCachePolicy(
+    isLocalPlayback: isLocalPlayback,
+    currentPlayer: () => mediaPlayer,
+  );
 
   _OwnedPlayer? _ownedPlayer;
   Player? get mediaPlayer => _ownedPlayer?.player;
   VideoController? videoController;
 
+  final AsyncSerialQueue _prefetchWrites = AsyncSerialQueue();
+  bool _prefetchSuspendWanted = false;
+
   bool hAenable = true;
   late String hardwareDecoder;
   bool androidEnableOpenSLES = true;
-  bool lowMemoryMode = false;
   bool autoPlay = true;
   bool playerDebugMode = false;
   int buttonSkipTime = 80;
   int arrowKeySkipTime = 10;
+
+  /// 历史记录传入的 offset
+  int startOffset = 0;
 
   /// 当前超分辨率模式
   @observable
@@ -131,6 +144,36 @@ abstract class _PlayerPlaybackController with Store {
     buffer = Duration.zero;
     duration = Duration.zero;
     completed = false;
+    startOffset = 0;
+  }
+
+  /// 本次会话是否从距结尾 [nearEndWatchedThreshold] 以内的位置起播。
+  /// 这样的"播放完成"并非真正看完，应从头重播而非切下一集
+  bool get resumedNearEnd {
+    if (startOffset <= 0 || duration <= Duration.zero) {
+      return false;
+    }
+    return Duration(seconds: startOffset) >= duration - nearEndWatchedThreshold;
+  }
+
+  /// 从头重播当前视频。[startOffset] 在重播落地后才归零，
+  /// 避免自动连播在此期间抢先触发
+  Future<void> restartFromBeginning() async {
+    final player = mediaPlayer;
+    if (player == null) {
+      return;
+    }
+    try {
+      await player.seek(Duration.zero);
+      if (!isCurrentPlayer(player)) {
+        return;
+      }
+      await player.play();
+      startOffset = 0;
+    } catch (e) {
+      KazumiLogger()
+          .w('PlayerController: failed to restart from beginning', error: e);
+    }
   }
 
   bool get playerPlaying {
@@ -189,12 +232,48 @@ abstract class _PlayerPlaybackController with Store {
     }
   }
 
+  /// Android blocks network access for backgrounded apps; a prefetching
+  /// demuxer then burns through ffmpeg's reconnect/segment retries and marks
+  /// the stream EOF, leaving playback permanently stuck once foregrounded.
+  /// Suspending zeroes the readahead window so no new requests are issued
+  /// while buffered data stays available; restore values are mpv defaults,
+  /// which media_kit leaves untouched. Writes are serialized and apply the
+  /// latest requested state, so rapid lifecycle flips cannot reorder.
+  Future<void> setPrefetchSuspended(bool suspended) async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    _prefetchSuspendWanted = suspended;
+    await _prefetchWrites.run(() async {
+      final wanted = _prefetchSuspendWanted;
+      final player = mediaPlayer;
+      if (player == null) {
+        return;
+      }
+      try {
+        final pp = player.platform as NativePlayer;
+        await pp.setProperty('cache-secs', wanted ? '0' : '36000');
+        if (!isCurrentPlayer(player)) {
+          return;
+        }
+        await pp.setProperty('demuxer-readahead-secs', wanted ? '0' : '1');
+      } catch (e) {
+        KazumiLogger().w(
+          'PlayerController: failed to ${wanted ? 'suspend' : 'resume'} demuxer prefetch',
+          error: e,
+        );
+      }
+    });
+  }
+
   Future<Player?> createVideoController(
     Map<String, String> httpHeaders,
     bool adBlockerEnabled, {
     required bool Function() canInstall,
     int offset = 0,
+    VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
   }) async {
+    startOffset = offset;
     superResolutionMode = SuperResolutionMode.fromStorageValue(
       GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
     );
@@ -203,7 +282,6 @@ abstract class _PlayerPlaybackController with Store {
         GStorage.getSetting(SettingsKeys.androidEnableOpenSLES);
     hardwareDecoder = GStorage.getSetting(SettingsKeys.hardwareDecoder);
     autoPlay = GStorage.getSetting(SettingsKeys.autoPlay);
-    lowMemoryMode = GStorage.getSetting(SettingsKeys.lowMemoryMode);
     playerDebugMode = GStorage.getSetting(SettingsKeys.playerDebugMode);
 
     if (!canInstall()) {
@@ -212,7 +290,7 @@ abstract class _PlayerPlaybackController with Store {
     final candidate = _OwnedPlayer(
       Player(
         configuration: PlayerConfiguration(
-          bufferSize: lowMemoryMode ? 15 * 1024 * 1024 : 100 * 1024 * 1024,
+          bufferSize: cachePolicy.bufferSize,
           osc: false,
           logLevel: MPVLogLevel.values[debug.playerLogLevel],
           adBlocker: adBlockerEnabled,
@@ -225,6 +303,7 @@ abstract class _PlayerPlaybackController with Store {
       return null;
     }
     _ownedPlayer = candidate;
+    cachePolicy.startWatching();
 
     try {
       debug.playerLog.clear();
@@ -243,6 +322,10 @@ abstract class _PlayerPlaybackController with Store {
       // 该设置可以在所有平台上正确启用双重缓存
       //await pp.setProperty("demuxer-cache-dir", await getPlayerTempPath());
       await pp.setProperty("cache-on-disk", "no");
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
+      }
+      await cachePolicy.apply();
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
       }
@@ -275,6 +358,15 @@ abstract class _PlayerPlaybackController with Store {
             return await _discardIfNotCurrent(candidate);
           }
           KazumiLogger().i('Player: HTTP 代理设置成功 $formattedProxy');
+        }
+      } else if (SystemProxyService.isActive) {
+        final proxy = SystemProxyService.proxyFor('https');
+        if (proxy != null) {
+          await pp.setProperty("http-proxy", 'http://${proxy.$1}:${proxy.$2}');
+          if (!isCurrentPlayer(player)) {
+            return await _discardIfNotCurrent(candidate);
+          }
+          KazumiLogger().i('Player: 跟随系统代理 http://${proxy.$1}:${proxy.$2}');
         }
       }
 
@@ -332,14 +424,15 @@ abstract class _PlayerPlaybackController with Store {
 
       bool showPlayerError = GStorage.getSetting(SettingsKeys.showPlayerError);
       player.stream.error.listen((event) {
-        if (showPlayerError) {
-          if (!isCurrentPlayer(player)) {
-            return;
-          }
-          if (event.toString().contains('Failed to open') && playerBuffering) {
+        if (isCurrentPlayer(player)) {
+          final actionableMessage = PlayerErrorMapper.toActionableMessage(
+            event,
+            isBuffering: playerBuffering,
+          );
+          if (actionableMessage != null) {
             KazumiDialog.showToast(
-                message: '加载失败, 请尝试更换其他视频来源', showActionButton: true);
-          } else {
+                message: actionableMessage, showActionButton: true);
+          } else if (showPlayerError) {
             KazumiDialog.showToast(
                 message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
                 duration: const Duration(seconds: 5),
@@ -357,6 +450,13 @@ abstract class _PlayerPlaybackController with Store {
         }
       }
 
+      if (videoSourceFormat == VideoSourceFormat.hls) {
+        await pp.setProperty('demuxer-lavf-format', 'hls');
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+      }
+
       await player.open(
         Media(videoUrl(),
             start: Duration(seconds: offset), httpHeaders: httpHeaders),
@@ -366,9 +466,14 @@ abstract class _PlayerPlaybackController with Store {
         return await _discardIfNotCurrent(candidate);
       }
 
+      if (cachePolicy.networkAutomatic) {
+        KazumiDialog.showToast(message: '移动数据下已自动开启低内存模式，可在播放设置中改为始终关闭');
+      }
+
       return player;
     } catch (error, stackTrace) {
       if (identical(_ownedPlayer, candidate)) {
+        cachePolicy.stopWatching();
         _ownedPlayer = null;
         videoController = null;
       }
@@ -511,6 +616,7 @@ abstract class _PlayerPlaybackController with Store {
   }
 
   Future<void> stop() async {
+    cachePolicy.stopWatching();
     final ownedPlayer = _ownedPlayer;
     _ownedPlayer = null;
     videoController = null;
@@ -524,15 +630,12 @@ abstract class _PlayerPlaybackController with Store {
     ]);
   }
 
-  Future<Uint8List?> screenshot({String format = 'image/jpeg'}) async {
-    return await mediaPlayer!.screenshot(format: format);
-  }
-
   Future<Uint8List?> screenshotPng() async {
     final player = mediaPlayer;
     if (player == null) {
       return null;
     }
-    return await screenshotService.capturePng(player);
+    // Encode the captured frame natively; PlayerState dimensions may be stale.
+    return player.safeScreenshot(format: 'image/png');
   }
 }

@@ -14,27 +14,35 @@ const String customAppFontFamily = "MI_Sans_Regular";
 
 /// Opts into the newer Material progress indicator appearance while Flutter
 /// still exposes the compatibility flag.
-/// ignore: deprecated_member_use
 const ProgressIndicatorThemeData progressIndicatorTheme2024 =
+    // ignore: deprecated_member_use
     ProgressIndicatorThemeData(year2023: false);
 
 /// Opts into the newer Material slider appearance while Flutter still exposes
 /// the compatibility flag.
-/// ignore: deprecated_member_use
 const SliderThemeData sliderTheme2024 = SliderThemeData(
+  // ignore: deprecated_member_use
   year2023: false,
   showValueIndicator: ShowValueIndicator.onDrag,
 );
 
-/// Flutter-managed platform transitions. Route-level Modular transitions should
-/// avoid overriding these unless the native page transition is intentionally bypassed.
-const PageTransitionsTheme pageTransitionsTheme2024 = PageTransitionsTheme(
+const _pageTransitionBuilders = <TargetPlatform, PageTransitionsBuilder>{
+  TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+  TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+  TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+  TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+  TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+};
+
+const PageTransitionsTheme pageTransitionsTheme2024 =
+    PageTransitionsTheme(builders: _pageTransitionBuilders);
+
+// Applied only to the settings navigator; fullscreen routes use the app theme.
+final PageTransitionsTheme settingsPageTransitionsTheme = PageTransitionsTheme(
   builders: {
-    TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
-    TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+    ..._pageTransitionBuilders,
+    TargetPlatform.linux: const FadeForwardsPageTransitionsBuilder(),
+    TargetPlatform.windows: const FadeForwardsPageTransitionsBuilder(),
   },
 );
 
@@ -68,17 +76,6 @@ const List<String> userAgentsList = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
 ];
-
-/// 默认 SyncPlay 服务器列表
-const List<String> defaultSyncPlayEndPoints = [
-  'syncplay.pl:8995',
-  'syncplay.pl:8996',
-  'syncplay.pl:8997',
-  'syncplay.pl:8998',
-  'syncplay.pl:8999',
-];
-
-const String defaultSyncPlayEndPoint = 'syncplay.pl:8996';
 
 /// 随机HTTP请求头accept-language字段列表
 const List<String> acceptLanguageList = [
@@ -168,6 +165,10 @@ const List<double> defaultPlaySpeedList = [
   2.75,
   3.0,
 ];
+
+/// 距视频结尾在此阈值内视为"已看完"：
+/// 保存历史时进度归零，续播起点落在其中时从头播放
+const Duration nearEndWatchedThreshold = Duration(seconds: 5);
 
 const String danmakuOnSvg = '''
     <svg xmlns="http://www.w3.org/2000/svg" data-pointer="none" viewBox="0 0 24 24">

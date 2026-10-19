@@ -48,24 +48,25 @@ class RuleEngine {
           : _xpathStrategy.prepareSearchRequest(config, keyword);
     } catch (error, stackTrace) {
       _logFailure(config, 'search request preparation', error, stackTrace);
-      throw SearchErrorException(
-        config.pluginName,
-        cause: error,
-        kind: RuleFailureKind.parse,
-      );
+      throw SearchErrorException(config.pluginName, cause: error);
     }
 
-    final raw = await _executeRequest(
-      request,
-      config,
-      phase: 'search request',
-      wrapError: (error) => SearchErrorException(
-        config.pluginName,
-        cause: error,
-        kind: RuleFailureKind.request,
-      ),
-      cancelToken: cancelToken,
-    );
+    late final String raw;
+    try {
+      raw = await _executeRequest(
+        request,
+        config,
+        phase: 'search request',
+        wrapError: (error) =>
+            SearchErrorException(config.pluginName, cause: error),
+        cancelToken: cancelToken,
+      );
+    } on SearchErrorException catch (error) {
+      if (_isCaptchaChallengeResponse(error, config)) {
+        throw CaptchaRequiredException(config.pluginName);
+      }
+      rethrow;
+    }
     try {
       final parsed = config.searchMode == RuleMode.api
           ? _apiStrategy.parseSearch(raw, config.searchApiConfig)
@@ -73,6 +74,7 @@ class RuleEngine {
       if (parsed.items.isEmpty) {
         throw NoResultException(config.pluginName);
       }
+      _logDiagnostics(config, 'search', parsed.diagnostics);
       return RuleSearchTrace(
         rawResponse: raw,
         response: PluginSearchResponse(
@@ -89,11 +91,39 @@ class RuleEngine {
     } catch (error, stackTrace) {
       if (_isCancellation(error)) rethrow;
       _logFailure(config, 'search response parsing', error, stackTrace);
-      throw SearchErrorException(
-        config.pluginName,
-        cause: error,
-        kind: RuleFailureKind.parse,
+      throw SearchErrorException(config.pluginName, cause: error);
+    }
+  }
+
+  /// Parses HTML harvested from the captcha webview as a search result,
+  /// skipping one network round trip after verification. Returns null when
+  /// not applicable (API/POST rules) or when the page does not parse into
+  /// results (still a challenge page, redirect page, or empty list) — the
+  /// caller then falls back to a regular re-search.
+  PluginSearchResponse? tryParseHarvestedSearch(
+    RuleExecutionConfig config,
+    String raw,
+  ) {
+    if (raw.trim().isEmpty) return null;
+    // The webview loads the search URL with GET; API-mode and POST-mode
+    // rules may render a different page than the real search response.
+    if (config.searchMode == RuleMode.api || config.usePost) return null;
+    try {
+      final parsed = _xpathStrategy.parseSearch(raw, config);
+      if (parsed.items.isEmpty) return null;
+      _logDiagnostics(config, 'harvested search', parsed.diagnostics);
+      return PluginSearchResponse(
+        pluginName: config.pluginName,
+        data: parsed.items,
       );
+    } catch (error) {
+      if (_logFailures) {
+        KazumiLogger().i(
+          'Plugin: ${config.pluginName} harvested page not parseable, '
+          'falling back to re-search ($error)',
+        );
+      }
+      return null;
     }
   }
 
@@ -112,22 +142,15 @@ class RuleEngine {
           : _xpathStrategy.prepareChapterRequest(config, source);
     } catch (error, stackTrace) {
       _logFailure(config, 'chapter request preparation', error, stackTrace);
-      throw ChapterErrorException(
-        config.pluginName,
-        cause: error,
-        kind: RuleFailureKind.parse,
-      );
+      throw ChapterErrorException(config.pluginName, cause: error);
     }
 
     final raw = await _executeRequest(
       request,
       config,
       phase: 'chapter request',
-      wrapError: (error) => ChapterErrorException(
-        config.pluginName,
-        cause: error,
-        kind: RuleFailureKind.request,
-      ),
+      wrapError: (error) =>
+          ChapterErrorException(config.pluginName, cause: error),
       cancelToken: cancelToken,
     );
     try {
@@ -140,15 +163,12 @@ class RuleEngine {
             )
           : _xpathStrategy.parseChapters(raw, config);
       if (parsed.roads.isEmpty) {
-        throw ChapterErrorException(
-          config.pluginName,
-          kind: RuleFailureKind.noResult,
-        );
+        throw ChapterErrorException(config.pluginName);
       }
+      _logDiagnostics(config, 'chapter', parsed.diagnostics);
       return RuleChapterTrace(
         rawResponse: raw,
         roads: parsed.roads,
-        matchedFragments: parsed.matchedFragments,
         diagnostics: parsed.diagnostics,
       );
     } on ChapterErrorException {
@@ -156,11 +176,7 @@ class RuleEngine {
     } catch (error, stackTrace) {
       if (_isCancellation(error)) rethrow;
       _logFailure(config, 'chapter response parsing', error, stackTrace);
-      throw ChapterErrorException(
-        config.pluginName,
-        cause: error,
-        kind: RuleFailureKind.parse,
-      );
+      throw ChapterErrorException(config.pluginName, cause: error);
     }
   }
 
@@ -189,6 +205,77 @@ class RuleEngine {
         error.type == NetworkExceptionType.cancel;
   }
 
+  /// Checks whether a failed XPath search request actually returned an
+  /// anti-crawler challenge page.
+  ///
+  /// Dio rejects non-2xx responses before [XPathRuleStrategy.parseSearch]
+  /// gets a chance to inspect the response body. Protected sites commonly
+  /// return challenge HTML with HTTP 403/429/503, so reuse the configured
+  /// captcha detector against the preserved Dio response body and hand the
+  /// request over to the existing captcha flow when it matches.
+  bool _isCaptchaChallengeResponse(
+    SearchErrorException error,
+    RuleExecutionConfig config,
+  ) {
+    if (config.searchMode != RuleMode.xpath ||
+        !config.antiCrawlerConfig.enabled) {
+      return false;
+    }
+
+    final cause = error.cause;
+    if (cause is! NetworkException ||
+        cause.type != NetworkExceptionType.badResponse) {
+      return false;
+    }
+
+    final rawError = cause.rawError;
+    if (rawError is! DioException) return false;
+
+    final response = rawError.response;
+
+    // Cloudflare marks managed challenge responses with this header.
+    // This is useful when the body is empty, compressed unexpectedly, or
+    // otherwise unavailable to Dio on a specific platform.
+    final cfMitigated = response?.headers.value('cf-mitigated');
+    if (cfMitigated?.toLowerCase() == 'challenge') {
+      return true;
+    }
+
+    final data = response?.data;
+    final raw = data is String ? data : data?.toString() ?? '';
+    if (raw.trim().isEmpty) return false;
+
+    try {
+      return _xpathStrategy.detectsCaptchaChallenge(
+        raw,
+        config.antiCrawlerConfig,
+      );
+    } catch (detectError, stackTrace) {
+      _logFailure(
+        config,
+        'failed response captcha detection',
+        detectError,
+        stackTrace,
+      );
+      return false;
+    }
+  }
+
+  /// Surfaces partially-skipped nodes so incomplete results are traceable
+  /// from logs even when the rule succeeds overall.
+  void _logDiagnostics(
+    RuleExecutionConfig config,
+    String phase,
+    List<String> diagnostics,
+  ) {
+    if (!_logFailures || diagnostics.isEmpty) return;
+    final preview = diagnostics.take(3).join('; ');
+    KazumiLogger().w(
+      'Plugin: ${config.pluginName} $phase skipped ${diagnostics.length} '
+      'node(s): $preview',
+    );
+  }
+
   void _logFailure(
     RuleExecutionConfig config,
     String phase,
@@ -214,19 +301,29 @@ class _DefaultRuleRequestExecutor implements RuleRequestExecutor {
     final cookieHeader = request.includeCookies
         ? await _cookieHeaderFor(config.pluginName, request.url)
         : '';
+    final verifiedUserAgent = cookieHeader.isNotEmpty
+        ? PluginCookieManager.instance.userAgentFor(config.pluginName)
+        : null;
+    // Header names are lowercased so a rule-supplied 'User-Agent' collides
+    // with ours instead of being sent as a second, conflicting header.
     final headers = <String, dynamic>{
       'referer': '${config.baseUrl}/',
-      if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
-      ...request.headers,
+      if (cookieHeader.isNotEmpty) 'cookie': cookieHeader,
+      for (final entry in request.headers.entries)
+        entry.key.toLowerCase(): entry.value,
+      // Clearance cookies are bound to the User-Agent they were issued to,
+      // so the verified UA overrides the rule's own; sending a different one
+      // would make the site serve the challenge page again.
+      if (verifiedUserAgent != null) 'user-agent': verifiedUserAgent,
     };
     if (request.method == 'POST') {
       switch (request.bodyType) {
         case ApiBodyType.json:
-          headers.putIfAbsent('Content-Type', () => 'application/json');
+          headers.putIfAbsent('content-type', () => 'application/json');
           break;
         case ApiBodyType.form:
           headers.putIfAbsent(
-            'Content-Type',
+            'content-type',
             () => 'application/x-www-form-urlencoded',
           );
           break;

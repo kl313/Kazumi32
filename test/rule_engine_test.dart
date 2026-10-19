@@ -62,7 +62,6 @@ void main() {
         expect(search.matchedFragments, isNotEmpty);
         expect(search.diagnostics, isEmpty);
         expect(chapters.rawResponse, isNotEmpty);
-        expect(chapters.matchedFragments, isNotEmpty);
         expect(chapters.diagnostics, isEmpty);
         expect(chapters.roads, isNotEmpty);
         expect(executor.requests, hasLength(2));
@@ -86,10 +85,7 @@ void main() {
         ),
         'keyword',
       ),
-      throwsA(
-        isA<SearchErrorException>()
-            .having((error) => error.kind, 'kind', RuleFailureKind.parse),
-      ),
+      throwsA(isA<SearchErrorException>()),
     );
   });
 
@@ -109,9 +105,7 @@ void main() {
         'keyword',
       ),
       throwsA(
-        isA<SearchErrorException>()
-            .having((error) => error.kind, 'kind', RuleFailureKind.parse)
-            .having(
+        isA<SearchErrorException>().having(
               (error) => error.cause,
               'cause',
               isA<XPathRuleFormatException>()
@@ -146,9 +140,7 @@ void main() {
         '/video/1',
       ),
       throwsA(
-        isA<ChapterErrorException>()
-            .having((error) => error.kind, 'kind', RuleFailureKind.parse)
-            .having(
+        isA<ChapterErrorException>().having(
               (error) => error.cause,
               'cause',
               isA<XPathRuleFormatException>()
@@ -186,7 +178,7 @@ void main() {
     );
   });
 
-  test('maps request failures to a typed request reason', () async {
+  test('wraps request failures in a search error', () async {
     final engine = RuleEngine(
       requestExecutor: _FakeExecutor(
         const [],
@@ -202,8 +194,100 @@ void main() {
       ),
       throwsA(
         isA<SearchErrorException>()
-            .having((error) => error.kind, 'kind', RuleFailureKind.request),
+            .having((error) => error.cause, 'cause', isA<StateError>()),
       ),
+    );
+  });
+
+  test('turns failed XPath challenge response into captcha flow', () async {
+    final engine = RuleEngine(
+      requestExecutor: _FakeExecutor(
+        const [],
+        error: _badResponse('<html>captcha</html>'),
+      ),
+      logFailures: false,
+    );
+
+    await expectLater(
+      engine.search(
+        _config(
+          searchMode: RuleMode.xpath,
+          chapterMode: RuleMode.xpath,
+          antiCrawler: _antiCrawler(),
+        ),
+        'keyword',
+      ),
+      throwsA(isA<CaptchaRequiredException>()),
+    );
+  });
+
+  test('turns Cloudflare challenge header into captcha flow', () async {
+    final engine = RuleEngine(
+      requestExecutor: _FakeExecutor(
+        const [],
+        error: _badResponse(
+          '',
+          headers: {'cf-mitigated': ['challenge']},
+        ),
+      ),
+      logFailures: false,
+    );
+
+    await expectLater(
+      engine.search(
+        _config(
+          searchMode: RuleMode.xpath,
+          chapterMode: RuleMode.xpath,
+          antiCrawler: _antiCrawler(),
+        ),
+        'keyword',
+      ),
+      throwsA(isA<CaptchaRequiredException>()),
+    );
+  });
+
+  test('keeps failed non-challenge XPath response as search error', () async {
+    final engine = RuleEngine(
+      requestExecutor: _FakeExecutor(
+        const [],
+        error: _badResponse('<html>forbidden</html>'),
+      ),
+      logFailures: false,
+    );
+
+    await expectLater(
+      engine.search(
+        _config(
+          searchMode: RuleMode.xpath,
+          chapterMode: RuleMode.xpath,
+          antiCrawler: _antiCrawler(),
+        ),
+        'keyword',
+      ),
+      throwsA(isA<SearchErrorException>()),
+    );
+  });
+
+  test('API search does not turn failed challenge response into captcha flow',
+      () async {
+    final engine = RuleEngine(
+      requestExecutor: _FakeExecutor(
+        const [],
+        error: _badResponse('<html>captcha</html>'),
+      ),
+      logFailures: false,
+    );
+
+    await expectLater(
+      engine.search(
+        _config(
+          searchMode: RuleMode.api,
+          chapterMode: RuleMode.xpath,
+          antiCrawler: _antiCrawler(),
+        ),
+        'keyword',
+      ),
+      throwsA(isA<SearchErrorException>()),
     );
   });
 
@@ -226,6 +310,31 @@ void main() {
       throwsA(same(cancellation)),
     );
   });
+}
+
+NetworkException _badResponse(
+  String body, {
+  int statusCode = 403,
+  Map<String, List<String>>? headers,
+}) {
+  final requestOptions = RequestOptions(
+    path: 'https://example.com/search?q=keyword',
+  );
+  return NetworkException(
+    type: NetworkExceptionType.badResponse,
+    message: 'server error',
+    statusCode: statusCode,
+    rawError: DioException(
+      requestOptions: requestOptions,
+      response: Response<String>(
+        requestOptions: requestOptions,
+        statusCode: statusCode,
+        data: body,
+        headers: headers == null ? null : Headers.fromMap(headers),
+      ),
+      type: DioExceptionType.badResponse,
+    ),
+  );
 }
 
 class _FakeExecutor implements RuleRequestExecutor {

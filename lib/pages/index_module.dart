@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:kazumi/bean/widget/error_widget.dart';
 import 'package:kazumi/bean/widget/image_preview.dart';
 import 'package:kazumi/pages/collect/collect_module.dart';
 import 'package:kazumi/pages/index_page.dart';
 import 'package:kazumi/pages/info/info_module.dart';
 import 'package:kazumi/pages/init_page.dart';
 import 'package:kazumi/pages/my/my_module.dart';
+import 'package:kazumi/pages/onboarding/onboarding_page.dart';
 import 'package:kazumi/pages/popular/popular_controller.dart';
 import 'package:kazumi/pages/popular/popular_module.dart';
 import 'package:kazumi/pages/route_error_page.dart';
@@ -20,6 +22,7 @@ import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/pages/my/my_controller.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
+import 'package:kazumi/services/sync/danmaku_shield_sync_service.dart';
 
 final _tabTransition = CustomTransition(
   duration: const Duration(milliseconds: 70),
@@ -44,7 +47,7 @@ final tabModule = createModule(
       ..addSingleton<TimelineController>(TimelineController.new)
       ..route(
         '/',
-        child: (context, state) => const IndexPage(),
+        child: (context, state) => IndexPage(location: state.uri.path),
         transition: _tabTransition,
         children: (sub) {
           sub
@@ -75,6 +78,15 @@ final indexModule = createModule(
           shaderAssetService: inject<ShaderAssetService>(),
           myController: inject<MyController>(),
           downloadController: inject<DownloadController>(),
+          danmakuShieldSync: inject<DanmakuShieldSyncService>(),
+        ),
+        transition: TransitionType.none,
+      )
+      ..route(
+        '/onboarding',
+        child: (context, state) => OnboardingPage(
+          pluginsController: inject<PluginsController>(),
+          myController: inject<MyController>(),
         ),
         transition: TransitionType.none,
       )
@@ -82,7 +94,10 @@ final indexModule = createModule(
         '/error',
         child: (context, state) => Scaffold(
           appBar: AppBar(title: const Text('Kazumi')),
-          body: const Center(child: Text('初始化失败')),
+          body: const GeneralErrorWidget(
+            title: '初始化失败',
+            errMsg: '请重新启动应用后再试。',
+          ),
         ),
       )
       ..module(tabModule)

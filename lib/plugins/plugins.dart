@@ -12,8 +12,9 @@ export 'package:kazumi/services/plugin/rule_engine_models.dart'
         CaptchaRequiredException,
         NoResultException,
         SearchErrorException,
-        ChapterErrorException,
-        RuleFailureKind;
+        ChapterErrorException;
+
+String pluginNameKey(String name) => name.toLowerCase();
 
 class Plugin {
   static final RuleEngine _ruleEngine = RuleEngine();
@@ -169,8 +170,13 @@ class Plugin {
       'referer': referer,
       'searchMode': searchMode,
       'chapterMode': chapterMode,
-      'searchApiConfig': searchApiConfig.toJson(),
-      'chapterApiConfig': chapterApiConfig.toJson(),
+      // Persisting re-serializes the whole plugin list, so a configured API
+      // rule must survive even while the mode points at XPath.
+      if (searchMode == RuleMode.api || searchApiConfig.request.url.isNotEmpty)
+        'searchApiConfig': searchApiConfig.toJson(),
+      if (chapterMode == RuleMode.api ||
+          chapterApiConfig.request.url.isNotEmpty)
+        'chapterApiConfig': chapterApiConfig.toJson(),
       'antiCrawlerConfig': antiCrawlerConfig.toJson(),
     };
   }
@@ -218,6 +224,13 @@ class Plugin {
     );
   }
 
+  /// Parses HTML harvested from the captcha webview as a search result;
+  /// returns null when not applicable, letting callers fall back to
+  /// [queryBangumi].
+  PluginSearchResponse? parseHarvestedSearch(String html) {
+    return _ruleEngine.tryParseHarvestedSearch(_executionConfig, html);
+  }
+
   Future<PluginSearchResponse> queryBangumi(
     String keyword, {
     bool shouldRethrow = false,
@@ -240,14 +253,6 @@ class Plugin {
     RuleCancelToken? cancelToken,
   }) async {
     return (await traceChapters(source, cancelToken: cancelToken)).roads;
-  }
-
-  @Deprecated('Use queryChapterRoads instead.')
-  Future<List<Road>> querychapterRoads(
-    String source, {
-    RuleCancelToken? cancelToken,
-  }) {
-    return queryChapterRoads(source, cancelToken: cancelToken);
   }
 
   String buildFullUrl(String urlItem) {

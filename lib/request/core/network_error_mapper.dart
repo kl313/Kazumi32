@@ -58,8 +58,20 @@ class NetworkErrorMapper {
           rawError: error,
           stackTrace: error.stackTrace,
         );
+      case DioExceptionType.transformTimeout:
+        return NetworkException(
+          type: NetworkExceptionType.parseError,
+          message: '响应解析超时，请稍后重试！',
+          rawError: error,
+          stackTrace: error.stackTrace,
+        );
       case DioExceptionType.unknown:
-        final connection = await _connectionLabel();
+        var connection = '';
+        try {
+          connection = await _connectionLabel().timeout(
+            const Duration(seconds: 1),
+          );
+        } catch (_) {}
         return NetworkException(
           type: NetworkExceptionType.unknown,
           message: '$connection 网络异常'.trimLeft(),

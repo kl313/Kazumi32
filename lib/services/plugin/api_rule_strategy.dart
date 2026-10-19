@@ -137,12 +137,23 @@ class ApiRuleStrategy {
     );
   }
 
-  RuleSearchParseResult parseSearch(String raw, ApiSearchConfig config) {
+  /// Validates all JSONPath expressions in a search rule. Also used by the
+  /// plugin editor to reject invalid rules before saving.
+  void validateSearchConfig(ApiSearchConfig config) {
     RestrictedJsonPath.validate(config.listPath);
     RestrictedJsonPath.validate(config.namePath);
     RestrictedJsonPath.validate(config.sourcePath);
+    final template = config.sourceTemplate;
+    if (template.isNotEmpty && !template.contains('@source')) {
+      throw const ApiRuleFormatException('详情页地址模板必须引用 @source');
+    }
+  }
+
+  RuleSearchParseResult parseSearch(String raw, ApiSearchConfig config) {
+    validateSearchConfig(config);
     final document = decodeResponse(raw);
     final nodes = RestrictedJsonPath.read(document, config.listPath);
+    final template = config.sourceTemplate;
     final results = <SearchItem>[];
     final fragments = <String>[];
     final diagnostics = <String>[];
@@ -159,7 +170,11 @@ class ApiRuleStrategy {
           diagnostics.add('搜索节点 $index 缺少名称或来源，已跳过');
           continue;
         }
-        results.add(SearchItem(name: name, src: source));
+        // Plain replacement so @source may follow a letter (`/GV@source`).
+        final src = template.isEmpty
+            ? source
+            : template.replaceAll('@source', Uri.encodeComponent(source));
+        results.add(SearchItem(name: name, src: src));
         fragments.add(jsonEncode(node));
       } on ApiRuleFormatException {
         rethrow;
@@ -180,7 +195,7 @@ class ApiRuleStrategy {
     required String source,
     required String baseUrl,
   }) {
-    _validateChapterConfig(config);
+    validateChapterConfig(config);
     final document = decodeResponse(raw);
     final rootVariables = <String, Object?>{'source': source};
     for (final entry in config.variables.entries) {
@@ -208,24 +223,10 @@ class ApiRuleStrategy {
             baseUrl,
             diagnostics,
           );
-    final fragments = config.format == ApiChapterFormat.delimited
-        ? <String>[raw]
-        : _chapterFragments(document, config);
     return RuleChapterParseResult(
       roads: roads,
-      matchedFragments: fragments,
       diagnostics: diagnostics,
     );
-  }
-
-  List<String> _chapterFragments(
-    dynamic document,
-    ApiChapterConfig config,
-  ) {
-    if (config.roadsPath.trim().isEmpty) return <String>[jsonEncode(document)];
-    return RestrictedJsonPath.read(document, config.roadsPath)
-        .map(jsonEncode)
-        .toList();
   }
 
   List<Road> _parseNested(
@@ -306,7 +307,7 @@ class ApiRuleStrategy {
         roads.add(
           Road(
             name: roadName.isEmpty
-                ? '${config.defaultRoadName}${roads.length + 1}'
+                ? '播放线路${roads.length + 1}'
                 : roadName,
             data: urls,
             identifier: names,
@@ -392,7 +393,7 @@ class ApiRuleStrategy {
       roads.add(
         Road(
           name: configuredName.isEmpty
-              ? '${config.defaultRoadName}${roads.length + 1}'
+              ? '播放线路${roads.length + 1}'
               : configuredName,
           data: urls,
           identifier: names,
@@ -415,6 +416,9 @@ class ApiRuleStrategy {
     if (page.url.trim().isEmpty) {
       throw const ApiRuleFormatException('播放页地址模板不能为空');
     }
+    // The template language has no arithmetic, so both 0-based and 1-based
+    // indices must be provided; @episodeUrl carries the raw value extracted
+    // by episodeUrlPath and has no substitute.
     final variables = <String, Object?>{
       ...rootVariables,
       'episodeUrl': rawUrl,
@@ -441,7 +445,10 @@ class ApiRuleStrategy {
     );
   }
 
-  void _validateChapterConfig(ApiChapterConfig config) {
+  /// Validates the JSONPath expressions and format-specific invariants of a
+  /// chapter rule. Also used by the plugin editor to reject invalid rules
+  /// before saving.
+  void validateChapterConfig(ApiChapterConfig config) {
     for (final path in config.variables.values) {
       RestrictedJsonPath.validate(path);
     }

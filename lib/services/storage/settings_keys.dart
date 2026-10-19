@@ -1,3 +1,6 @@
+import 'package:kazumi/services/player/syncplay_endpoint.dart';
+import 'package:kazumi/utils/device.dart';
+
 enum SettingGroup {
   player,
   danmaku,
@@ -60,6 +63,11 @@ class SettingsKeys {
     true,
     group: SettingGroup.update,
   );
+  static const checkPluginUpdateOnStartup = SettingKey<bool>(
+    'checkPluginUpdateOnStartup',
+    true,
+    group: SettingGroup.update,
+  );
   static const alwaysOntop = SettingKey<bool>(
     _SettingBoxKey.alwaysOntop,
     false,
@@ -94,6 +102,13 @@ class SettingsKeys {
     _SettingBoxKey.danmakuEnhance,
     true,
     group: SettingGroup.danmaku,
+  );
+  /// Off on desktop and on on mobile, like the B 站 client.
+  static final pauseOnDanmakuEdit = SettingKey<bool>(
+    'pauseOnDanmakuEdit',
+    true,
+    group: SettingGroup.danmaku,
+    defaultResolver: (_) => !isDesktop(),
   );
   static const danmakuBorder = SettingKey<bool>(
     _SettingBoxKey.danmakuBorder,
@@ -139,6 +154,11 @@ class SettingsKeys {
   static const danmakuDeduplication = SettingKey<bool>(
     _SettingBoxKey.danmakuDeduplication,
     false,
+    group: SettingGroup.danmaku,
+  );
+  static const danmakuChConvert = SettingKey<int>(
+    'danmakuChConvert',
+    0,
     group: SettingGroup.danmaku,
   );
   static const danmakuArea = SettingKey<double>(
@@ -228,7 +248,7 @@ class SettingsKeys {
   );
   static const showPlayerError = SettingKey<bool>(
     _SettingBoxKey.showPlayerError,
-    true,
+    false,
     group: SettingGroup.player,
   );
   static const oledEnhance = SettingKey<bool>(
@@ -243,12 +263,23 @@ class SettingsKeys {
   );
   static const enableGitProxy = SettingKey<bool>(
     _SettingBoxKey.enableGitProxy,
-    false,
+    true,
     group: SettingGroup.proxy,
   );
   static const enableBangumiProxy = SettingKey<bool>(
     _SettingBoxKey.enableBangumiProxy,
-    false,
+    true,
+    group: SettingGroup.proxy,
+  );
+  static const imageAcceleration = SettingKey<String>(
+    'imageAcceleration',
+    'ech',
+    group: SettingGroup.proxy,
+  );
+  // An unset mode inherits the old mirror switch (enabled by default).
+  static const bangumiAcceleration = SettingKey<String>(
+    'bangumiAcceleration',
+    '',
     group: SettingGroup.proxy,
   );
   static const enableSystemProxy = SettingKey<bool>(
@@ -259,11 +290,6 @@ class SettingsKeys {
   static const defaultStartupPage = SettingKey<String>(
     _SettingBoxKey.defaultStartupPage,
     '/tab/popular/',
-    group: SettingGroup.interface,
-  );
-  static const isWideScreen = SettingKey<bool>(
-    _SettingBoxKey.isWideScreen,
-    false,
     group: SettingGroup.interface,
   );
   static const webDavEnable = SettingKey<bool>(
@@ -280,6 +306,26 @@ class SettingsKeys {
     _SettingBoxKey.webDavEnableCollect,
     false,
     group: SettingGroup.webdav,
+  );
+  static const webDavEnableDanmakuShield = SettingKey<bool>(
+    'webDavEnableDanmakuShield',
+    false,
+    group: SettingGroup.webdav,
+  );
+  static const danmakuShieldSyncDeviceId = SettingKey<String>(
+    'danmakuShieldSyncDeviceId',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const danmakuShieldSyncState = SettingKey<String>(
+    'danmakuShieldSyncState',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const danmakuShieldSyncCorruptState = SettingKey<String>(
+    'danmakuShieldSyncCorruptState',
+    '',
+    group: SettingGroup.sync,
   );
   static const webDavURL = SettingKey<String>(
     _SettingBoxKey.webDavURL,
@@ -299,6 +345,12 @@ class SettingsKeys {
   static const lowMemoryMode = SettingKey<bool>(
     _SettingBoxKey.lowMemoryMode,
     false,
+    group: SettingGroup.player,
+  );
+  // Null preserves the legacy lowMemoryMode choice until a policy is selected.
+  static const lowMemoryPolicy = SettingKey<String?>(
+    'lowMemoryPolicy',
+    null,
     group: SettingGroup.player,
   );
   static const showWindowButton = SettingKey<bool>(
@@ -323,7 +375,12 @@ class SettingsKeys {
   );
   static const syncPlayEndPoint = SettingKey<String>(
     _SettingBoxKey.syncPlayEndPoint,
-    '127.0.0.1:8999',
+    defaultSyncPlayEndPoint,
+    group: SettingGroup.player,
+  );
+  static const syncPlayUserName = SettingKey<String>(
+    'syncPlayUserName',
+    '',
     group: SettingGroup.player,
   );
   static const androidEnableOpenSLES = SettingKey<bool>(
@@ -416,9 +473,9 @@ class SettingsKeys {
     true,
     group: SettingGroup.interface,
   );
-  static const showAnimeCounter = SettingKey<bool>(
-    _SettingBoxKey.showAnimeCounter,
-    false,
+  static const defaultCollectLayout = SettingKey<String>(
+    'defaultCollectLayout',
+    'list',
     group: SettingGroup.interface,
   );
   static const downloadParallelEpisodes = SettingKey<int>(
@@ -436,8 +493,25 @@ class SettingsKeys {
     true,
     group: SettingGroup.download,
   );
+  static const downloadDirectory = SettingKey<String>(
+    _SettingBoxKey.downloadDirectory,
+    '',
+    group: SettingGroup.download,
+  );
+  // macOS only: security-scoped bookmark that keeps downloadDirectory
+  // writable across app restarts under the sandbox.
+  static const downloadDirectoryBookmark = SettingKey<String>(
+    'downloadDirectoryBookmark',
+    '',
+    group: SettingGroup.download,
+  );
   static const shortcutDialogShown = SettingKey<bool>(
     _SettingBoxKey.shortcutDialogShown,
+    false,
+    group: SettingGroup.misc,
+  );
+  static const onboardingCompleted = SettingKey<bool>(
+    'onboardingCompleted',
     false,
     group: SettingGroup.misc,
   );
@@ -502,6 +576,7 @@ class SettingsKeys {
     hardwareDecoder,
     searchEnhanceEnable,
     autoUpdate,
+    checkPluginUpdateOnStartup,
     alwaysOntop,
     defaultPlaySpeed,
     defaultShortcutForwardPlaySpeed,
@@ -509,6 +584,7 @@ class SettingsKeys {
     buttonSkipTime,
     arrowKeySkipTime,
     danmakuEnhance,
+    pauseOnDanmakuEdit,
     danmakuBorder,
     danmakuBorderSize,
     danmakuOpacity,
@@ -518,6 +594,7 @@ class SettingsKeys {
     danmakuBottom,
     danmakuMassive,
     danmakuDeduplication,
+    danmakuChConvert,
     danmakuArea,
     danmakuColor,
     danmakuDuration,
@@ -540,21 +617,28 @@ class SettingsKeys {
     displayMode,
     enableGitProxy,
     enableBangumiProxy,
+    imageAcceleration,
+    bangumiAcceleration,
     enableSystemProxy,
     defaultStartupPage,
-    isWideScreen,
     webDavEnable,
     webDavEnableHistory,
     webDavEnableCollect,
+    webDavEnableDanmakuShield,
+    danmakuShieldSyncDeviceId,
+    danmakuShieldSyncState,
+    danmakuShieldSyncCorruptState,
     webDavURL,
     webDavUsername,
     webDavPassword,
     lowMemoryMode,
+    lowMemoryPolicy,
     showWindowButton,
     useDynamicColor,
     exitBehavior,
     playerDebugMode,
     syncPlayEndPoint,
+    syncPlayUserName,
     androidEnableOpenSLES,
     androidVideoRenderer,
     androidAutoEnterPIP,
@@ -573,11 +657,14 @@ class SettingsKeys {
     proxyUrl,
     proxyTestUrl,
     showRating,
-    showAnimeCounter,
+    defaultCollectLayout,
     downloadParallelEpisodes,
     downloadParallelSegments,
     downloadDanmaku,
+    downloadDirectory,
+    downloadDirectoryBookmark,
     shortcutDialogShown,
+    onboardingCompleted,
     bangumiSyncEnable,
     bangumiAccessToken,
     bangumiSyncPriority,
@@ -650,9 +737,6 @@ class _SettingBoxKey {
       enableBangumiProxy = 'enableBangumiProxy',
       enableSystemProxy = 'enableSystemProxy',
       defaultStartupPage = 'defaultStartupPage',
-
-      /// Deprecated
-      isWideScreen = 'isWideScreen',
       webDavEnable = 'webDavEnable',
       webDavEnableHistory = 'webDavEnableHistory',
       webDavEnableCollect = 'webDavEnableCollect',
@@ -683,10 +767,10 @@ class _SettingBoxKey {
       proxyUrl = 'proxyUrl',
       proxyTestUrl = 'proxyTestUrl',
       showRating = 'showRating',
-      showAnimeCounter = 'showAnimeCounter',
       downloadParallelEpisodes = 'downloadParallelEpisodes',
       downloadParallelSegments = 'downloadParallelSegments',
       downloadDanmaku = 'downloadDanmaku',
+      downloadDirectory = 'downloadDirectory',
       shortcutDialogShown = 'shortcutDialogShown',
       bangumiSyncEnable = 'bangumiSyncEnable',
       bangumiAccessToken = 'bangumiAccessToken',

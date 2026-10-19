@@ -3,13 +3,14 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/modules/history/history_sync.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/history_storage_coordinator.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/async_serial_queue.dart';
-import 'package:path_provider/path_provider.dart';
 
 class HistorySyncService {
   static const int checkpointLogThresholdBytes = 1024 * 1024;
@@ -211,11 +212,7 @@ class HistorySyncService {
     await GStorage.histories.flush();
   }
 
-  /// Creates a stable set of local logs for one sync attempt.
-  ///
-  /// A checkpoint attempt renames the active log to a pending file, allowing
-  /// playback to continue appending to a fresh log. Pending files survive
-  /// failed or interrupted syncs and are picked up by the next attempt.
+  /// Rotate active logs for concurrent appends; retain pending files until sync commits.
   Future<HistorySyncLogBatch> prepareLocalLogs({
     required Directory runDirectory,
     required bool forceCheckpoint,
@@ -270,6 +267,7 @@ class HistorySyncService {
     });
   }
 
+  /// Sanitize the upload and active log so corrupt lines do not keep propagating.
   Future<File?> copyActiveLogForUpload(Directory runDirectory) {
     return _localLogQueue.run(() async {
       final activeFile = await localChangeLogFile();
@@ -280,9 +278,41 @@ class HistorySyncService {
         '${runDirectory.path}${Platform.pathSeparator}'
         'local-events-upload.jsonl',
       );
-      await activeFile.copy(uploadFile.path);
+      final result = await _sanitizeEventLogCopy(
+        sourcePath: activeFile.path,
+        targetPath: uploadFile.path,
+      );
+      final malformedLines = result['malformedLines']!;
+      if (malformedLines > 0) {
+        KazumiLogger().w(
+          'HistorySync: dropped $malformedLines malformed line(s) '
+          'from local event log upload',
+        );
+        await _repairActiveLog(activeFile, uploadFile);
+      }
+      if (result['validLines'] == 0) {
+        return null;
+      }
       return uploadFile;
     });
+  }
+
+  /// Requires [_localLogQueue] to prevent appends during replacement.
+  Future<void> _repairActiveLog(File activeFile, File sanitizedFile) async {
+    try {
+      final tempFile = File('${activeFile.path}.repair');
+      await sanitizedFile.copy(tempFile.path);
+      await tempFile.rename(activeFile.path);
+      KazumiLogger().w(
+        'HistorySync: rewrote local event log without malformed lines',
+      );
+    } catch (e, stackTrace) {
+      KazumiLogger().w(
+        'HistorySync: failed to repair local event log',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   Future<void> completeCheckpoint(HistorySyncLogBatch batch) {
@@ -304,24 +334,33 @@ class HistorySyncService {
     return HistorySyncSnapshot.fromJson(json);
   }
 
+  /// Optionally skip malformed lines while logging each failure.
   Future<HistorySyncSnapshot> mergeEventFiles({
     required HistorySyncSnapshot snapshot,
     required Iterable<File> eventFiles,
     required Iterable<HistorySyncEvent> inMemoryEvents,
+    bool tolerateMalformedLines = false,
   }) async {
     final request = <String, dynamic>{
       'snapshot': snapshot.toJson(),
       'eventFiles': eventFiles.map((file) => file.path).toList(),
       'events': inMemoryEvents.map((event) => event.toJson()).toList(),
+      'tolerateMalformedLines': tolerateMalformedLines,
     };
-    final mergedJson =
-        await Isolate.run(() => _mergeHistoryEventFiles(request));
-    return HistorySyncSnapshot.fromJson(mergedJson);
+    final response = await Isolate.run(() => _mergeHistoryEventFiles(request));
+    final skippedLines = Map<String, int>.from(response['skippedLines'] as Map);
+    for (final entry in skippedLines.entries) {
+      KazumiLogger().w(
+        'HistorySync: skipped ${entry.value} malformed line(s) '
+        'in local event log ${entry.key}',
+      );
+    }
+    return HistorySyncSnapshot.fromJson(
+      Map<String, dynamic>.from(response['snapshot'] as Map),
+    );
   }
 
-  /// Merges independently-owned remote logs without letting one invalid file
-  /// block every device. Each file is transactional: none of its events are
-  /// applied if parsing fails.
+  /// Merge each remote file atomically so one invalid log cannot block other devices.
   Future<HistorySyncSnapshot> mergeRemoteEventFiles({
     required HistorySyncSnapshot snapshot,
     required Iterable<File> eventFiles,
@@ -447,22 +486,32 @@ Future<Map<String, dynamic>> _mergeHistoryEventFiles(
   );
   final merger = HistorySyncStreamMerger(snapshot);
   final eventFiles = (request['eventFiles'] as List).cast<String>();
+  final tolerateMalformedLines =
+      request['tolerateMalformedLines'] as bool? ?? false;
+  final skippedLines = <String, int>{};
 
   for (final path in eventFiles) {
     final lines = File(path)
         .openRead()
-        .transform(utf8.decoder)
+        .transform(Utf8Decoder(allowMalformed: tolerateMalformedLines))
         .transform(const LineSplitter());
     await for (final rawLine in lines) {
       final line = rawLine.trim();
       if (line.isEmpty) {
         continue;
       }
-      merger.add(
-        HistorySyncEvent.fromJson(
-          Map<String, dynamic>.from(jsonDecode(line) as Map),
-        ),
-      );
+      try {
+        merger.add(
+          HistorySyncEvent.fromJson(
+            Map<String, dynamic>.from(jsonDecode(line) as Map),
+          ),
+        );
+      } catch (_) {
+        if (!tolerateMalformedLines) {
+          rethrow;
+        }
+        skippedLines[path] = (skippedLines[path] ?? 0) + 1;
+      }
     }
   }
 
@@ -474,5 +523,59 @@ Future<Map<String, dynamic>> _mergeHistoryEventFiles(
     ),
   );
 
-  return merger.snapshot().toJson();
+  return <String, dynamic>{
+    'snapshot': merger.snapshot().toJson(),
+    'skippedLines': skippedLines,
+  };
+}
+
+// Keep the isolate entry point top-level to avoid capturing the service.
+Future<Map<String, int>> _sanitizeEventLogCopy({
+  required String sourcePath,
+  required String targetPath,
+}) {
+  final request = <String, String>{
+    'sourcePath': sourcePath,
+    'targetPath': targetPath,
+  };
+  return Isolate.run(() => _copyValidEventLines(request));
+}
+
+// Drop corrupt lines before other devices can quarantine the entire log.
+Future<Map<String, int>> _copyValidEventLines(
+  Map<String, String> request,
+) async {
+  final sourcePath = request['sourcePath']!;
+  final targetPath = request['targetPath']!;
+  final probe = HistorySyncStreamMerger(HistorySyncSnapshot.empty());
+  final sink = File(targetPath).openWrite();
+  var validLines = 0;
+  var malformedLines = 0;
+  try {
+    final lines = File(sourcePath)
+        .openRead()
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const LineSplitter());
+    await for (final rawLine in lines) {
+      final line = rawLine.trim();
+      if (line.isEmpty) {
+        continue;
+      }
+      try {
+        probe.add(
+          HistorySyncEvent.fromJson(
+            Map<String, dynamic>.from(jsonDecode(line) as Map),
+          ),
+        );
+      } catch (_) {
+        malformedLines++;
+        continue;
+      }
+      sink.writeln(line);
+      validLines++;
+    }
+  } finally {
+    await sink.close();
+  }
+  return {'validLines': validLines, 'malformedLines': malformedLines};
 }
